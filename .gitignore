@@ -1,6 +1,8 @@
 *.exe
 *.log
 *.msi
+*.wixpdb
 z-api-proxy-setup.exe
 build/
+releases/
 vendor/

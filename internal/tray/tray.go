@@ -143,6 +143,7 @@ func (t *trayApp) onReady() {
 
 	mConfig := systray.AddMenuItem("Configure...", "Open config.toml in Notepad")
 	mTest := systray.AddMenuItem("Test Connection", "Test upstream reachability")
+	mCopyURL := systray.AddMenuItem("Copy Base URL", "Copy the proxy base URL for Cursor")
 	mStartup := systray.AddMenuItemCheckbox("Start with Windows", "Launch Z-API Proxy when Windows starts", startupPref)
 
 	systray.AddSeparator()
@@ -151,7 +152,7 @@ func (t *trayApp) onReady() {
 
 	go t.updateTooltip()
 	go t.updateIcon()
-	go t.handleMenu(mConfig, mTest, mStartup, mExit)
+	go t.handleMenu(mConfig, mTest, mCopyURL, mStartup, mExit)
 }
 
 func (t *trayApp) onExit() {}
@@ -187,7 +188,7 @@ func (t *trayApp) updateIcon() {
 	}
 }
 
-func (t *trayApp) handleMenu(mConfig, mTest, mStartup, mExit *systray.MenuItem) {
+func (t *trayApp) handleMenu(mConfig, mTest, mCopyURL, mStartup, mExit *systray.MenuItem) {
 	for {
 		select {
 		case <-mConfig.ClickedCh:
@@ -197,6 +198,9 @@ func (t *trayApp) handleMenu(mConfig, mTest, mStartup, mExit *systray.MenuItem) 
 
 		case <-mTest.ClickedCh:
 			go t.testConnection()
+
+		case <-mCopyURL.ClickedCh:
+			go t.copyBaseURL()
 
 		case <-mStartup.ClickedCh:
 			nowOn := !mStartup.Checked()
@@ -247,4 +251,21 @@ func (t *trayApp) testConnection() {
 	default:
 		messageBox(fmt.Sprintf("Upstream is reachable.\nHTTP %d", resp.StatusCode), "Z-API Proxy — Test", mbIconWarning)
 	}
+}
+
+// copyBaseURL writes the proxy's OpenAI-compatible base URL to the Windows
+// clipboard via PowerShell, then shows a confirmation dialog.
+func (t *trayApp) copyBaseURL() {
+	cfg := t.manager.Get()
+	baseURL := fmt.Sprintf("http://%s/v1", cfg.Server.Listen)
+
+	cmd := exec.Command("powershell", "-NoProfile", "-Command",
+		fmt.Sprintf("Set-Clipboard -Value '%s'", baseURL))
+	if err := cmd.Run(); err != nil {
+		log.Printf("clipboard error: %v", err)
+		messageBox("Failed to copy to clipboard:\n"+err.Error(), "Z-API Proxy", mbIconError)
+		return
+	}
+
+	messageBox(fmt.Sprintf("Copied to clipboard:\n\n%s\n\nPaste this into Cursor:\nSettings → Models → OpenAI API Base URL", baseURL), "Z-API Proxy — Copy", mbIconInfo)
 }

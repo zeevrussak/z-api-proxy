@@ -2,7 +2,7 @@
 !include "MUI2.nsh"
 !include "LogicLib.nsh"
 
-Name "Z-API Proxy"
+Name "Z-API Proxy ${APPVERSION}"
 OutFile "z-api-proxy-setup.exe"
 InstallDir "$PROGRAMFILES64\Z-API-Proxy"
 RequestExecutionLevel admin
@@ -10,7 +10,9 @@ Unicode True
 ShowInstDetails show
 
 !define APPNAME "Z-API Proxy"
-!define APPVERSION "1.0.0"
+!ifndef APPVERSION
+  !define APPVERSION "1.0.0"
+!endif
 
 ; Use the app icon for the installer executable and shortcuts
 Icon "assets\icon.ico"

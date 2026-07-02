@@ -9,25 +9,27 @@ A **Windows system-tray reverse proxy** that sits between Cursor (the AI editor)
 ## Commands
 
 ```bash
-# Build both architectures (amd64 + arm64) into build\{amd64,arm64}\
+# Full release: Go binaries (amd64+arm64) + MSIs + NSIS installer → releases/
+# Reads VERSION file, injects version into binary via ldflags
 build.bat
-# or manually:
-GOOS=windows GOARCH=amd64 go build -ldflags "-H windowsgui" -o build/amd64/z-api-proxy.exe .
-GOOS=windows GOARCH=arm64 go build -ldflags "-H windowsgui" -o build/arm64/z-api-proxy.exe .
 
 # Vet (there is no linter configured)
 go vet ./...
 
-# Go tests — THERE ARE NONE. Do not expect `go test ./...` to do anything.
-
 # Smoke test (integration, requires Python 3 + a running proxy instance)
 python test_smoke.py
 
-# Build installer (requires NSIS installed; makensis on PATH + both archs built)
-makensis installer.nsi
+# Build MSI per-arch (requires WiX v4+ as dotnet tool: dotnet tool install -g wix)
+wix build installer.wxs -arch x64 -d MsiVersion=1.0.0 -d DisplayVersion=1.0.0-alpha \
+    -d BinPath=build/amd64/z-api-proxy.exe -d UpgradeCode=18CAB0AD-AF9E-4C0B-AD01-99EF83004F7C \
+    -o releases/z-api-proxy-1.0.0-alpha-amd64.msi
 ```
 
-The app ships as **native binaries for both amd64 and arm64**. The NSIS installer is a 32-bit process that detects the host architecture via `PROCESSOR_ARCHITEW6432` (`ARM64` on ARM64 Windows, `AMD64` on x64) and installs the matching binary — no emulation layer needed on ARM64 devices.
+The app ships as **native binaries for both amd64 and arm64**. The NSIS installer detects the host architecture at install time via `PROCESSOR_ARCHITEW6432`. The MSIs are per-architecture. Both produce Start Menu shortcuts, ARP registry entries, and launch after install.
+
+**Version management**: the `VERSION` file (e.g. `1.0.0-alpha`) is the single source of truth. `build.bat` reads it and injects it into the Go binary (`-X main.version=...`), MSIs (display name + numeric version), and NSIS installer. MSI ProductVersion strips the pre-release suffix (`1.0.0-alpha` → numeric `1.0.0`).
+
+**Release artifacts** land in `releases/` (gitignored): `z-api-proxy-{VERSION}-amd64.msi`, `z-api-proxy-{VERSION}-arm64.msi`, `z-api-proxy-{VERSION}-setup.exe` (NSIS).
 
 The smoke test is **not** a unit test. It starts a mock upstream in-process (Python `http.server`), assumes the real proxy is already running on `127.0.0.1:8787`, and asserts the forward/reverse rewriting works end-to-end against a config that maps `z.ai/glm-5.2` → `glm-5.2`. If you change rewriting logic, run the proxy first, then the smoke test.
 

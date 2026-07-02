@@ -26,18 +26,25 @@ Cursor sends model names like `z.ai/glm-5.2`, but the z.ai API expects `glm-5.2`
 
 Requirements:
 - **Go 1.25+**
-- **[NSIS](https://nsis.sourceforge.io/)** (only if building the installer)
+- **[WiX v4+](https://wixtoolset.org/)** (`dotnet tool install -g wix`) for MSI installers
+- **[NSIS](https://nsis.sourceforge.io/)** (optional, for the combined exe installer)
 
 ```bash
-# Build both architectures (outputs to build\amd64\ and build\arm64\)
+# Full release build: compiles both architectures, builds MSIs + NSIS installer
+# Artifacts are placed in releases/
 build.bat
 
-# Or build manually for your architecture
-go build -ldflags "-H windowsgui" -o z-api-proxy.exe .
-
-# Build the installer (requires both architectures built + NSIS on PATH)
-makensis installer.nsi
+# Or build a single binary manually for your architecture
+go build -ldflags "-H windowsgui -X main.version=dev" -o z-api-proxy.exe .
 ```
+
+Release artifacts in `releases/`:
+
+| File | Description |
+|------|-------------|
+| `z-api-proxy-{VERSION}-amd64.msi` | MSI installer for x64 Windows |
+| `z-api-proxy-{VERSION}-arm64.msi` | MSI installer for ARM64 Windows |
+| `z-api-proxy-{VERSION}-setup.exe` | Combined NSIS installer (auto-detects architecture) |
 
 ## Configuration
 
@@ -76,10 +83,20 @@ to = "glm-4.6"
 
 ### Setting up Cursor
 
+> **Critical**: You **must** use a custom API key in Cursor. If you use
+> Cursor's default (subscription) mode, requests route through Cursor's
+> servers, which block private network addresses (`127.0.0.1`) with the
+> error *"Access to private networks is forbidden."* A custom key forces
+> Cursor to send requests directly from your machine to the local proxy.
+
 1. Start z-api-proxy (it appears in your system tray)
-2. In Cursor: **Settings → Models → OpenAI API Base URL**
-3. Set it to `http://127.0.0.1:8787/v1`
-4. Add your z.ai API key in Cursor (or set it in `config.toml` under `[upstream].api_key`)
+2. In Cursor: **Settings → Models → OpenAI API Key** — enter your z.ai API key
+3. In Cursor: **Settings → Models → OpenAI API Base URL**
+4. Set it to `http://127.0.0.1:8787/v1`
+5. Make sure the model name matches a `[[models]].from` entry in your config (e.g. `z.ai/glm-5.2`)
+
+Alternatively, set the z.ai API key in `config.toml` under `[upstream].api_key`
+and leave Cursor's key field empty — the proxy will inject it.
 
 ## Tray Menu
 

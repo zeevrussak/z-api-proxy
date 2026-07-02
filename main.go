@@ -15,6 +15,10 @@ import (
 	"z-api-proxy/internal/tray"
 )
 
+// version is set at build time via ldflags (-X main.version=...).
+// It defaults to "dev" for local, untagged builds.
+var version = "dev"
+
 //go:embed assets/icon.ico
 var iconNormal []byte
 
@@ -27,7 +31,7 @@ func main() {
 	if err == nil {
 		log.SetOutput(logFile)
 	}
-	log.Println("=== z-api-proxy starting ===")
+	log.Printf("=== z-api-proxy %s starting ===", version)
 
 	configPath := config.DefaultConfigPath()
 	manager, err := config.NewManager(configPath)

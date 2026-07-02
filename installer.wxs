@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Z-API Proxy MSI installer (WiX v4+)
+
+  Variables passed at build time via `wix build -d ...`:
+    MsiVersion     Numeric MSI version, e.g. "1.0.0"
+    DisplayVersion Full semver string, e.g. "1.0.0-alpha"
+    BinPath        Path to the compiled z-api-proxy.exe
+    UpgradeCode    Stable GUID for major upgrades (differs per architecture)
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+    Name="Z-API Proxy $(var.DisplayVersion)"
+    Manufacturer="Z-API-Proxy"
+    Version="$(var.MsiVersion)"
+    Language="1033"
+    Codepage="1252"
+    UpgradeCode="$(var.UpgradeCode)">
+
+    <MajorUpgrade
+      DowngradeErrorMessage="A newer version of Z-API Proxy is already installed. The installer will now exit." />
+
+    <Media Id="1" Cabinet="zapi.cab" EmbedCab="yes" />
+
+    <Icon Id="AppIcon" SourceFile="assets\icon.ico" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/zeevrussak/z-api-proxy" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Z-API-Proxy">
+        <Component Id="MainExecutable" Guid="*">
+          <File Id="ZApiProxyExe" Source="$(var.BinPath)" KeyPath="yes">
+            <Shortcut
+              Id="StartMenuShortcut"
+              Directory="ProgramMenuFolder"
+              Name="Z-API Proxy"
+              Description="Z-API Proxy"
+              WorkingDirectory="INSTALLFOLDER" />
+          </File>
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Component Id="ProgramMenuDir" Guid="*">
+        <RemoveFolder Id="RemoveProgramMenuDir" Directory="ProgramMenuFolder" On="uninstall" />
+        <RegistryValue Root="HKCU" Key="Software\Z-API-Proxy" Name="StartMenuShortcut"
+          Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+
+    <Feature Id="Complete" Title="Z-API Proxy" Level="1">
+      <ComponentRef Id="MainExecutable" />
+      <ComponentRef Id="ProgramMenuDir" />
+    </Feature>
+
+    <!-- Launch the app after a fresh install -->
+    <CustomAction Id="LaunchApp" Directory="INSTALLFOLDER"
+      ExeCommand="[INSTALLFOLDER]z-api-proxy.exe" Execute="deferred"
+      Impersonate="yes" Return="asyncNoWait" />
+
+    <InstallExecuteSequence>
+      <Custom Action="LaunchApp" After="InstallFinalize" Condition="NOT Installed" />
+    </InstallExecuteSequence>
+
+  </Package>
+</Wix>

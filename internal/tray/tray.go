@@ -161,13 +161,15 @@ func (t *trayApp) onReady() {
 	mUpdate := systray.AddMenuItem("Update", "Check for updates")
 	mUpdate.Hide()
 
+	mContact := systray.AddMenuItem("Contact Developer", "Send an email to the developer")
+
 	systray.AddSeparator()
 
 	mExit := systray.AddMenuItem("Exit", "Quit Z-API Proxy")
 
 	go t.updateTooltip()
 	go t.updateIcon()
-	go t.handleMenu(mConfig, mTest, mCopyURL, mTunnel, mCopyTunnel, mStartup, mUpdate, mExit)
+	go t.handleMenu(mConfig, mTest, mCopyURL, mTunnel, mCopyTunnel, mStartup, mUpdate, mContact, mExit)
 	go t.checkForUpdates(mUpdate)
 }
 
@@ -204,7 +206,7 @@ func (t *trayApp) updateIcon() {
 	}
 }
 
-func (t *trayApp) handleMenu(mConfig, mTest, mCopyURL, mTunnel, mCopyTunnel, mStartup, mUpdate, mExit *systray.MenuItem) {
+func (t *trayApp) handleMenu(mConfig, mTest, mCopyURL, mTunnel, mCopyTunnel, mStartup, mUpdate, mContact, mExit *systray.MenuItem) {
 	for {
 		select {
 		case <-mConfig.ClickedCh:
@@ -236,6 +238,12 @@ func (t *trayApp) handleMenu(mConfig, mTest, mCopyURL, mTunnel, mCopyTunnel, mSt
 
 		case <-mUpdate.ClickedCh:
 			go t.installUpdate(mUpdate)
+
+		case <-mContact.ClickedCh:
+			if err := exec.Command("rundll32", "url.dll,FileProtocolHandler",
+				"mailto:zaiproxy.contact@20032014.xyz?subject=Z-API%20Proxy%20Feedback").Start(); err != nil {
+				log.Printf("failed to open mail client: %v", err)
+			}
 
 		case <-mExit.ClickedCh:
 			t.tunnel.Stop()

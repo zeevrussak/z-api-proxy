@@ -71,8 +71,8 @@ api_key = "test"
 	if cfg.Server.Listen != "127.0.0.1:8787" {
 		t.Errorf("default Listen = %q, want 127.0.0.1:8787", cfg.Server.Listen)
 	}
-	if cfg.Upstream.BaseURL != "https://api.z.ai/api/paas/v4" {
-		t.Errorf("default BaseURL = %q, want https://api.z.ai/api/paas/v4", cfg.Upstream.BaseURL)
+	if cfg.Upstream.BaseURL != "https://api.z.ai/api/coding/paas/v4" {
+		t.Errorf("default BaseURL = %q, want https://api.z.ai/api/coding/paas/v4", cfg.Upstream.BaseURL)
 	}
 }
 
@@ -155,8 +155,8 @@ func TestCreateDefault(t *testing.T) {
 	if cfg.Server.Listen != "127.0.0.1:8787" {
 		t.Errorf("Listen = %q, want 127.0.0.1:8787", cfg.Server.Listen)
 	}
-	if cfg.Upstream.BaseURL != "https://api.z.ai/api/paas/v4" {
-		t.Errorf("BaseURL = %q, want https://api.z.ai/api/paas/v4", cfg.Upstream.BaseURL)
+	if cfg.Upstream.BaseURL != "https://api.z.ai/api/coding/paas/v4" {
+		t.Errorf("BaseURL = %q, want https://api.z.ai/api/coding/paas/v4", cfg.Upstream.BaseURL)
 	}
 	if len(cfg.Models) != 14 {
 		t.Fatalf("Models length = %d, want 14", len(cfg.Models))

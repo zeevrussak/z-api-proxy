@@ -115,11 +115,29 @@ Cursor  ──HTTPS──>  Cloudflare Tunnel  ──>  z-api-proxy (127.0.0.1:8
 
 ### Public Tunnel Details
 
-The tunnel uses [cloudflared](https://github.com/cloudflare/cloudflared) (Apache 2.0 license). On first use, the proxy downloads `cloudflared.exe` (~50 MB) to `%APPDATA%\Z-API-Proxy\` and caches it. The tunnel creates a random `*.trycloudflare.com` URL that forwards to your local proxy. No Cloudflare account, API token, or configuration is needed.
+The tunnel uses [cloudflared](https://github.com/cloudflare/cloudflared) (Apache 2.0 license). On first use, the proxy downloads `cloudflared.exe` (~50 MB) to `%APPDATA%\Z-API-Proxy\` and caches it.
 
-**Note:** Quick Tunnel URLs are ephemeral — they change each time the tunnel restarts. For a stable URL, consider running your own Cloudflare Named Tunnel.
+**Two tunnel modes:**
 
-**Auto-start:** Once you enable the tunnel via the tray menu, it automatically starts on every app launch. The preference is stored in `%APPDATA%\Z-API-Proxy\tunnel.pref`. Disable it by clicking **Stop Public Tunnel**.
+| Mode | URL | Account | Setup |
+|------|-----|---------|-------|
+| **Quick** (default) | Random `*.trycloudflare.com` | None | One click |
+| **Named** | Your stable hostname (e.g. `proxy.example.com`) | Cloudflare Zero Trust | Paste tunnel token in config |
+
+**Quick Tunnel** URLs are ephemeral — they change on each restart. For a stable URL:
+
+1. Create a Cloudflare account and go to **Zero Trust → Networks → Tunnels**
+2. Create a tunnel and copy the **token**
+3. Set up a public hostname (e.g. `proxy.yourdomain.com`) pointing to `http://localhost:8787`
+4. In `config.toml`:
+   ```toml
+   [tunnel]
+   mode = "named"
+   token = "eyJh..."  # from Zero Trust dashboard
+   hostname = "https://proxy.yourdomain.com"
+   ```
+
+**Auto-start:** Once you enable the tunnel via the tray menu, it automatically starts on every app launch. The preference is stored in `%APPDATA%\Z-API-Proxy\tunnel.pref`.
 
 ## Build from Source
 

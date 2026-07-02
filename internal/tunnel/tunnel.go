@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -43,14 +44,29 @@ type Manager struct {
 	url      string
 	listen   string
 	cacheDir string
+	mode     string // "quick" or "named"
+	token    string // Cloudflare tunnel token (named mode)
+	hostname string // stable hostname (named mode)
 }
 
 // New creates a Manager that will tunnel traffic to the given local
-// listen address (e.g. "127.0.0.1:8787").
-func New(listen string) *Manager {
+// listen address (e.g. "127.0.0.1:8787"). For named tunnels, pass
+// mode="named", a Cloudflare token, and the stable hostname.
+func New(listen, mode, token, hostname string) *Manager {
+	if mode == "" {
+		mode = "quick"
+	}
+	if mode == "named" && hostname != "" {
+		if !strings.HasPrefix(hostname, "https://") {
+			hostname = "https://" + hostname
+		}
+	}
 	return &Manager{
 		listen:   listen,
 		cacheDir: cacheDir(),
+		mode:     mode,
+		token:    token,
+		hostname: hostname,
 	}
 }
 
@@ -133,9 +149,10 @@ func (m *Manager) URL() string {
 	return m.url
 }
 
-// Start downloads cloudflared (if needed) and launches a quick tunnel.
-// It returns the public URL once cloudflared prints it AND the tunnel
-// is verified reachable via an HTTP health check.
+// Start downloads cloudflared (if needed) and launches the tunnel.
+// For quick tunnels it scans cloudflared output for the ephemeral URL.
+// For named tunnels the URL is known upfront from config.
+// In both cases a health check verifies reachability before returning.
 func (m *Manager) Start() (string, error) {
 	m.mu.Lock()
 	if m.cmd != nil && m.cmd.Process != nil {
@@ -148,16 +165,63 @@ func (m *Manager) Start() (string, error) {
 		return "", fmt.Errorf("cannot download cloudflared: %w", err)
 	}
 
+	// Named tunnel: URL is known from config, just launch and verify.
+	if m.mode == "named" && m.token != "" {
+		return m.startNamed()
+	}
+	return m.startQuick()
+}
+
+// startNamed launches a Cloudflare Named Tunnel using a token from the
+// Zero Trust dashboard. The hostname is stable and known from config.
+func (m *Manager) startNamed() (string, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// --no-autoupdate prevents cloudflared from trying to self-update,
-	// which can hang the process on some systems.
+	cmd := exec.CommandContext(ctx, m.cloudflaredPath(),
+		"tunnel", "--no-autoupdate", "run", "--token", m.token)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+
+	if err := cmd.Start(); err != nil {
+		cancel()
+		return "", fmt.Errorf("cannot start cloudflared: %w", err)
+	}
+
+	m.mu.Lock()
+	m.cmd = cmd
+	m.cancel = cancel
+	m.url = m.hostname
+	m.mu.Unlock()
+
+	log.Printf("tunnel: named tunnel started (PID %d), verifying %s...", cmd.Process.Pid, m.hostname)
+
+	go func() {
+		err := cmd.Wait()
+		log.Printf("tunnel: cloudflared exited: %v", err)
+		m.mu.Lock()
+		m.cmd = nil
+		m.cancel = nil
+		m.url = ""
+		m.mu.Unlock()
+	}()
+
+	if err := m.healthCheck(m.hostname); err != nil {
+		m.Stop()
+		return "", fmt.Errorf("named tunnel not reachable: %w", err)
+	}
+
+	log.Printf("tunnel: named tunnel active = %s", m.hostname)
+	return m.hostname, nil
+}
+
+// startQuick launches a Cloudflare Quick Tunnel with an ephemeral URL.
+// Scans cloudflared output for the trycloudflare.com URL.
+func (m *Manager) startQuick() (string, error) {
+	ctx, cancel := context.WithCancel(context.Background())
+
 	cmd := exec.CommandContext(ctx, m.cloudflaredPath(),
 		"tunnel", "--no-autoupdate", "--url", "http://"+m.listen)
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 
-	// cloudflared prints the tunnel URL to both stdout and stderr
-	// depending on version — capture both.
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		cancel()
@@ -182,7 +246,6 @@ func (m *Manager) Start() (string, error) {
 
 	log.Printf("tunnel: cloudflared started (PID %d), waiting for URL...", cmd.Process.Pid)
 
-	// Scan both stdout and stderr until we find the tunnel URL.
 	urlCh := make(chan string, 2)
 	exitCh := make(chan error, 1)
 
@@ -204,7 +267,6 @@ func (m *Manager) Start() (string, error) {
 	go scan("stdout", stdout)
 	go scan("stderr", stderr)
 
-	// Wait for process exit in background.
 	go func() {
 		err := cmd.Wait()
 		log.Printf("tunnel: cloudflared exited: %v", err)
@@ -216,7 +278,6 @@ func (m *Manager) Start() (string, error) {
 		exitCh <- err
 	}()
 
-	// Wait for URL or exit (whichever comes first), with a 60s timeout.
 	var tunnelURL string
 	select {
 	case url := <-urlCh:
@@ -228,7 +289,6 @@ func (m *Manager) Start() (string, error) {
 		return "", fmt.Errorf("timed out after 60s waiting for tunnel URL — cloudflared may be blocked by a firewall")
 	}
 
-	// Health check: verify the tunnel is actually serving by hitting it.
 	log.Printf("tunnel: verifying reachability of %s", tunnelURL)
 	if err := m.healthCheck(tunnelURL); err != nil {
 		m.Stop()

@@ -19,6 +19,7 @@ import (
 type Config struct {
 	Server   ServerConfig   `toml:"server"`
 	Upstream UpstreamConfig `toml:"upstream"`
+	Tunnel   TunnelConfig   `toml:"tunnel"`
 	Models   []ModelMapping `toml:"models"`
 }
 
@@ -38,7 +39,21 @@ type UpstreamConfig struct {
 	APIKey string `toml:"api_key"`
 }
 
-// ModelMapping defines a single bidirectional model-name translation.
+// TunnelConfig holds optional Cloudflare Named Tunnel settings.
+// When Mode is "named" and Token is non-empty, the tunnel uses a stable
+// hostname instead of a random Quick Tunnel URL.
+type TunnelConfig struct {
+	// Mode is "quick" (default, ephemeral URL) or "named" (stable URL).
+	Mode string `toml:"mode"`
+	// Token is the Cloudflare tunnel token from the Zero Trust dashboard.
+	// Required when Mode is "named".
+	Token string `toml:"token"`
+	// Hostname is the stable public hostname (e.g. proxy.example.com).
+	// Used for display/copy when Mode is "named".
+	Hostname string `toml:"hostname"`
+}
+
+// ModelMapping defines a single bidirectional model-names translation.
 // Cursor sends From; the proxy rewrites it to To before forwarding upstream.
 // In responses, To is rewritten back to From so Cursor recognizes the model.
 type ModelMapping struct {
@@ -62,7 +77,7 @@ func Load(path string) (*Config, error) {
 		cfg.Server.Listen = "127.0.0.1:8787"
 	}
 	if cfg.Upstream.BaseURL == "" {
-		cfg.Upstream.BaseURL = "https://api.z.ai/api/paas/v4"
+		cfg.Upstream.BaseURL = "https://api.z.ai/api/coding/paas/v4"
 	}
 	return &cfg, nil
 }
@@ -97,10 +112,18 @@ listen = "127.0.0.1:8787"
 
 [upstream]
 # z.ai API base URL
-base_url = "https://api.z.ai/api/paas/v4"
+base_url = "https://api.z.ai/api/coding/paas/v4"
 
 # API key for z.ai. Leave empty to pass through from Cursor.
 api_key = ""
+
+# Cloudflare tunnel settings.
+# mode = "quick" (default): random ephemeral URL, no account needed.
+# mode = "named":            stable URL, requires token from Cloudflare Zero Trust.
+[tunnel]
+mode = "quick"
+token = ""
+hostname = ""
 
 # Model name mappings.
 # Cursor sends "from", proxy rewrites to "to" before forwarding upstream.

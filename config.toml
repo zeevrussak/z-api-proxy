@@ -14,6 +14,14 @@ base_url = "https://api.z.ai/api/paas/v4"
 # API key for z.ai. Leave empty to pass through from Cursor.
 api_key = ""
 
+# Cloudflare tunnel settings.
+# mode = "quick" (default): random ephemeral URL, no account needed.
+# mode = "named":            stable URL, requires token from Cloudflare Zero Trust.
+[tunnel]
+mode = "quick"
+token = ""
+hostname = ""
+
 # Model name mappings.
 # "from" = model name as sent by Cursor
 # "to"   = model name as expected by z.ai upstream

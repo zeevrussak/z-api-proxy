@@ -153,7 +153,7 @@ func Run(iconNormal, iconError []byte, manager *config.Manager, ctr *counter.Cou
 		counter:    ctr,
 		proxy:      px,
 		configPath: configPath,
-		tunnel:     tunnel.New(cfg.Server.Listen),
+		tunnel:     tunnel.New(cfg.Server.Listen, cfg.Tunnel.Mode, cfg.Tunnel.Token, cfg.Tunnel.Hostname),
 		version:    version,
 	}
 	systray.Run(app.onReady, app.onExit)
@@ -277,8 +277,7 @@ func (t *trayApp) handleMenu(mConfig, mTest, mCopyURL, mTunnel, mStartup, mUpdat
 	}
 }
 
-// toggleTunnel starts or stops the public tunnel. Starting is async because
-// it involves downloading cloudflared and waiting for the URL.
+// toggleTunnel starts or stops the public tunnel.
 func (t *trayApp) toggleTunnel(mTunnel, mCopyURL *systray.MenuItem) {
 	if t.tunnel.Running() {
 		t.tunnel.Stop()
@@ -288,24 +287,14 @@ func (t *trayApp) toggleTunnel(mTunnel, mCopyURL *systray.MenuItem) {
 		return
 	}
 
-	if !t.tunnel.IsDownloaded() {
-		messageBox("Starting tunnel...\n\nThis will download cloudflared (~50 MB) on first use.\nPlease wait, this may take a minute.", "Z-API Proxy — Tunnel", mbIconInfo)
-	}
-
-	mTunnel.SetTitle("Starting tunnel...")
-	url, err := t.tunnel.Start()
-	if err != nil {
-		log.Printf("tunnel error: %v", err)
-		messageBox("Failed to start tunnel:\n\n"+err.Error(), "Z-API Proxy — Tunnel", mbIconError)
+	_, ok := showTunnelWindow(t.tunnel)
+	if ok {
+		saveTunnelPref(true)
+		mTunnel.SetTitle("Stop Public Tunnel")
+		mCopyURL.SetTitle("Copy Public Tunnel URL")
+	} else {
 		mTunnel.SetTitle("Start Public Tunnel")
-		return
 	}
-
-	saveTunnelPref(true)
-	mTunnel.SetTitle("Stop Public Tunnel")
-	mCopyURL.SetTitle("Copy Public Tunnel URL")
-
-	messageBox(fmt.Sprintf("Public tunnel is live and verified!\n\n%s/v1\n\nUse this URL in Cursor:\nSettings \u2192 Models \u2192 OpenAI API Base URL", url), "Z-API Proxy — Tunnel", mbIconInfo)
 }
 
 // autoStartTunnel is called on startup when the tunnel preference is enabled.

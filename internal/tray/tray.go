@@ -44,6 +44,30 @@ func messageBox(text, title string, flags uintptr) {
 	procMessageBox.Call(0, uintptr(unsafe.Pointer(t)), uintptr(unsafe.Pointer(c)), flags)
 }
 
+// --- Tunnel preference ---
+
+func tunnelPrefPath() string {
+	return filepath.Join(config.AppConfigDir(), "tunnel.pref")
+}
+
+func loadTunnelPref() bool {
+	data, err := os.ReadFile(tunnelPrefPath())
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(string(data)) == "1"
+}
+
+func saveTunnelPref(on bool) {
+	val := "0"
+	if on {
+		val = "1"
+	}
+	if err := os.WriteFile(tunnelPrefPath(), []byte(val), 0644); err != nil {
+		log.Printf("tunnel pref: cannot persist: %v", err)
+	}
+}
+
 // --- Windows autostart (Run registry key) ---
 
 func startupPrefPath() string {
@@ -171,6 +195,11 @@ func (t *trayApp) onReady() {
 	go t.updateIcon()
 	go t.handleMenu(mConfig, mTest, mCopyURL, mTunnel, mCopyTunnel, mStartup, mUpdate, mContact, mExit)
 	go t.checkForUpdates(mUpdate)
+
+	// Auto-start tunnel if previously enabled
+	if loadTunnelPref() {
+		go t.autoStartTunnel(mTunnel, mCopyTunnel)
+	}
 }
 
 func (t *trayApp) onExit() {}
@@ -258,6 +287,7 @@ func (t *trayApp) handleMenu(mConfig, mTest, mCopyURL, mTunnel, mCopyTunnel, mSt
 func (t *trayApp) toggleTunnel(mTunnel, mCopyTunnel *systray.MenuItem) {
 	if t.tunnel.Running() {
 		t.tunnel.Stop()
+		saveTunnelPref(false)
 		mTunnel.SetTitle("Start Public Tunnel")
 		mCopyTunnel.Disable()
 		return
@@ -272,11 +302,26 @@ func (t *trayApp) toggleTunnel(mTunnel, mCopyTunnel *systray.MenuItem) {
 		return
 	}
 
+	saveTunnelPref(true)
 	mTunnel.SetTitle("Stop Public Tunnel")
 	mCopyTunnel.SetTitle("Copy Tunnel URL: " + url)
 	mCopyTunnel.Enable()
 
 	messageBox(fmt.Sprintf("Public tunnel is live!\n\n%s\n\nUse this URL in Cursor:\nSettings \u2192 Models \u2192 OpenAI API Base URL\n(Append /v1 to the URL)", url), "Z-API Proxy — Tunnel", mbIconInfo)
+}
+
+// autoStartTunnel is called on startup when the tunnel preference is enabled.
+// It starts the tunnel silently (no popup dialog on success).
+func (t *trayApp) autoStartTunnel(mTunnel, mCopyTunnel *systray.MenuItem) {
+	url, err := t.tunnel.Start()
+	if err != nil {
+		log.Printf("tunnel auto-start error: %v", err)
+		return
+	}
+	mTunnel.SetTitle("Stop Public Tunnel")
+	mCopyTunnel.SetTitle("Copy Tunnel URL: " + url)
+	mCopyTunnel.Enable()
+	log.Printf("tunnel auto-started: %s", url)
 }
 
 // copyTunnelURL writes the current public tunnel URL to the clipboard.

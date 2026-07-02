@@ -1,5 +1,6 @@
-; Z-API Proxy NSIS Installer
+; Z-API Proxy NSIS Installer (dual-arch: amd64 + arm64)
 !include "MUI2.nsh"
+!include "LogicLib.nsh"
 
 Name "Z-API Proxy"
 OutFile "z-api-proxy-setup.exe"
@@ -23,7 +24,15 @@ ShowInstDetails show
 
 Section "Install"
   SetOutPath "$INSTDIR"
-  File "z-api-proxy.exe"
+
+  ; NSIS is a 32-bit process. On ARM64 Windows PROCESSOR_ARCHITEW6432=ARM64,
+  ; on x64 Windows PROCESSOR_ARCHITEW6432=AMD64.
+  ReadEnvStr $0 "PROCESSOR_ARCHITEW6432"
+  ${If} $0 == "ARM64"
+    File /oname=z-api-proxy.exe "build\arm64\z-api-proxy.exe"
+  ${Else}
+    File /oname=z-api-proxy.exe "build\amd64\z-api-proxy.exe"
+  ${EndIf}
 
   ; Start Menu shortcut
   CreateShortcut "$SMPROGRAMS\${APPNAME}.lnk" "$INSTDIR\z-api-proxy.exe"

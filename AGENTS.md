@@ -9,9 +9,11 @@ A **Windows system-tray reverse proxy** that sits between Cursor (the AI editor)
 ## Commands
 
 ```bash
-# Build (produces windowless GUI exe — -H windowsgui suppresses the console)
-go build -ldflags "-H windowsgui" -o z-api-proxy.exe .
-# or just: build.bat
+# Build both architectures (amd64 + arm64) into build\{amd64,arm64}\
+build.bat
+# or manually:
+GOOS=windows GOARCH=amd64 go build -ldflags "-H windowsgui" -o build/amd64/z-api-proxy.exe .
+GOOS=windows GOARCH=arm64 go build -ldflags "-H windowsgui" -o build/arm64/z-api-proxy.exe .
 
 # Vet (there is no linter configured)
 go vet ./...
@@ -21,9 +23,11 @@ go vet ./...
 # Smoke test (integration, requires Python 3 + a running proxy instance)
 python test_smoke.py
 
-# Build installer (requires NSIS installed; makensis on PATH)
+# Build installer (requires NSIS installed; makensis on PATH + both archs built)
 makensis installer.nsi
 ```
+
+The app ships as **native binaries for both amd64 and arm64**. The NSIS installer is a 32-bit process that detects the host architecture via `PROCESSOR_ARCHITEW6432` (`ARM64` on ARM64 Windows, `AMD64` on x64) and installs the matching binary — no emulation layer needed on ARM64 devices.
 
 The smoke test is **not** a unit test. It starts a mock upstream in-process (Python `http.server`), assumes the real proxy is already running on `127.0.0.1:8787`, and asserts the forward/reverse rewriting works end-to-end against a config that maps `z.ai/glm-5.2` → `glm-5.2`. If you change rewriting logic, run the proxy first, then the smoke test.
 

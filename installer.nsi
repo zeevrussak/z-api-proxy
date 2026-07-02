@@ -12,6 +12,9 @@ ShowInstDetails show
 !define APPNAME "Z-API Proxy"
 !define APPVERSION "1.0.0"
 
+; Use the app icon for the installer executable and shortcuts
+Icon "assets\icon.ico"
+
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
@@ -35,7 +38,7 @@ Section "Install"
   ${EndIf}
 
   ; Start Menu shortcut
-  CreateShortcut "$SMPROGRAMS\${APPNAME}.lnk" "$INSTDIR\z-api-proxy.exe"
+  CreateShortcut "$SMPROGRAMS\${APPNAME}.lnk" "$INSTDIR\z-api-proxy.exe" "" "$INSTDIR\z-api-proxy.exe" 0
 
   ; Registry entry for Add/Remove Programs
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}" "DisplayName" "${APPNAME}"

@@ -1,3 +1,9 @@
+// Package config manages the z-api-proxy configuration.
+//
+// The configuration is stored as TOML in a user-specific directory
+// (%APPDATA%\Z-API-Proxy on Windows). The Manager type provides
+// thread-safe access to the live configuration and hot-reloads changes
+// by polling the file modification time every 5 seconds.
 package config
 
 import (
@@ -9,26 +15,40 @@ import (
 	"github.com/pelletier/go-toml/v2"
 )
 
+// Config is the root configuration structure, deserialized from the TOML file.
 type Config struct {
 	Server   ServerConfig   `toml:"server"`
 	Upstream UpstreamConfig `toml:"upstream"`
 	Models   []ModelMapping `toml:"models"`
 }
 
+// ServerConfig holds the local HTTP server settings.
 type ServerConfig struct {
+	// Listen is the local address the proxy binds to (e.g. "127.0.0.1:8787").
 	Listen string `toml:"listen"`
 }
 
+// UpstreamConfig holds the destination API settings.
 type UpstreamConfig struct {
+	// BaseURL is the z.ai API base URL including the API version path.
 	BaseURL string `toml:"base_url"`
-	APIKey  string `toml:"api_key"`
+	// APIKey is an optional z.ai API key. When non-empty it overrides the
+	// Authorization header on upstream requests. When empty the proxy
+	// passes through whatever the client (Cursor) sent.
+	APIKey string `toml:"api_key"`
 }
 
+// ModelMapping defines a single bidirectional model-name translation.
+// Cursor sends From; the proxy rewrites it to To before forwarding upstream.
+// In responses, To is rewritten back to From so Cursor recognizes the model.
 type ModelMapping struct {
 	From string `toml:"from"`
 	To   string `toml:"to"`
 }
 
+// Load reads and parses the TOML configuration file at path.
+// Missing [server].listen and [upstream].base_url values are replaced
+// with sensible defaults.
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -47,6 +67,7 @@ func Load(path string) (*Config, error) {
 	return &cfg, nil
 }
 
+// ForwardMap returns a lookup from Cursor model names to upstream model names.
 func (c *Config) ForwardMap() map[string]string {
 	m := make(map[string]string, len(c.Models))
 	for _, mm := range c.Models {
@@ -55,6 +76,8 @@ func (c *Config) ForwardMap() map[string]string {
 	return m
 }
 
+// ReverseMap returns a lookup from upstream model names back to Cursor
+// model names, used when rewriting responses.
 func (c *Config) ReverseMap() map[string]string {
 	m := make(map[string]string, len(c.Models))
 	for _, mm := range c.Models {
@@ -63,6 +86,8 @@ func (c *Config) ReverseMap() map[string]string {
 	return m
 }
 
+// CreateDefault writes a starter config file with built-in model mappings
+// (z.ai/glm-5.2 and z.ai/glm-4.6) to the given path.
 func CreateDefault(path string) error {
 	content := `# Z-API Proxy Configuration
 
@@ -85,11 +110,13 @@ to = "glm-5.2"
 
 [[models]]
 from = "z.ai/glm-4.6"
-to = "glm-4.6"
-`
+to = "glm-4.6"`
 	return os.WriteFile(path, []byte(content), 0644)
 }
 
+// AppConfigDir returns the per-user configuration directory for the proxy,
+// creating it if necessary. On Windows this is %APPDATA%\Z-API-Proxy;
+// on other platforms it falls back to ~/.config/Z-API-Proxy.
 func AppConfigDir() string {
 	appData := os.Getenv("APPDATA")
 	if appData == "" {
@@ -101,16 +128,23 @@ func AppConfigDir() string {
 	return dir
 }
 
+// DefaultConfigPath returns the canonical location of config.toml inside
+// the per-user AppConfigDir.
 func DefaultConfigPath() string {
 	return filepath.Join(AppConfigDir(), "config.toml")
 }
 
+// Manager provides thread-safe access to the live Config and hot-reloads
+// it when the file changes on disk. It is safe for concurrent use.
 type Manager struct {
 	path    string
 	current atomic.Pointer[Config]
 	modTime time.Time
 }
 
+// NewManager loads (or creates) the config at path and starts a background
+// goroutine that watches for file changes. Callers should call Get on every
+// request to read the freshest configuration.
 func NewManager(path string) (*Manager, error) {
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		if err := CreateDefault(path); err != nil {
@@ -128,10 +162,15 @@ func NewManager(path string) (*Manager, error) {
 	return m, nil
 }
 
+// Get returns the most recently loaded Config. The returned pointer is safe
+// for concurrent reads and is never nil after successful initialization.
 func (m *Manager) Get() *Config {
 	return m.current.Load()
 }
 
+// watch polls the config file's modification time every 5 seconds and
+// reloads it atomically when a change is detected. Parse errors are
+// silently skipped to avoid clobbering a good config with a broken one.
 func (m *Manager) watch() {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()

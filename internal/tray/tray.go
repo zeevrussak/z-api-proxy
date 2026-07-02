@@ -236,9 +236,15 @@ func (t *trayApp) testConnection() {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == 200 {
-		messageBox("Connection successful.\nUpstream is reachable.", "Z-API Proxy — Test", mbIconInfo)
-	} else {
-		messageBox(fmt.Sprintf("Upstream returned HTTP %d.", resp.StatusCode), "Z-API Proxy — Test", mbIconWarning)
+	switch {
+	case resp.StatusCode == 200:
+		messageBox("Connection successful.\nUpstream is reachable and authenticated.", "Z-API Proxy — Test", mbIconInfo)
+	case resp.StatusCode == 401 || resp.StatusCode == 403:
+		// A 401/403 still proves the upstream is reachable — the server
+		// responded, it just requires credentials. When api_key is empty
+		// in config (pass-through mode) the test has no key to send.
+		messageBox("Upstream is reachable.\nHTTP 401 — authentication required.\nIf api_key is empty, the proxy passes through the key from Cursor at runtime.", "Z-API Proxy — Test", mbIconInfo)
+	default:
+		messageBox(fmt.Sprintf("Upstream is reachable.\nHTTP %d", resp.StatusCode), "Z-API Proxy — Test", mbIconWarning)
 	}
 }

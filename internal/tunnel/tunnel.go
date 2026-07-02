@@ -26,8 +26,6 @@ import (
 	"time"
 )
 
-// cloudflaredDownloadURL is the GitHub release URL for the latest cloudflared.
-// We pick the right architecture at runtime.
 const (
 	cloudflaredDownloadBase = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-"
 	cloudflaredExeName      = "cloudflared.exe"
@@ -73,10 +71,15 @@ func (m *Manager) cloudflaredPath() string {
 	return filepath.Join(m.cacheDir, cloudflaredExeName)
 }
 
+// IsDownloaded reports whether cloudflared.exe has been cached locally.
+func (m *Manager) IsDownloaded() bool {
+	_, err := os.Stat(m.cloudflaredPath())
+	return err == nil
+}
+
 // ensureDownloaded downloads cloudflared.exe if not already cached.
 func (m *Manager) ensureDownloaded() error {
-	exePath := m.cloudflaredPath()
-	if _, err := os.Stat(exePath); err == nil {
+	if m.IsDownloaded() {
 		return nil
 	}
 
@@ -87,7 +90,9 @@ func (m *Manager) ensureDownloaded() error {
 	url := cloudflaredDownloadBase + arch + ".exe"
 
 	log.Printf("tunnel: downloading cloudflared from %s", url)
-	resp, err := http.Get(url)
+
+	client := &http.Client{Timeout: 5 * time.Minute}
+	resp, err := client.Get(url)
 	if err != nil {
 		return fmt.Errorf("download failed: %w", err)
 	}
@@ -97,6 +102,7 @@ func (m *Manager) ensureDownloaded() error {
 		return fmt.Errorf("download returned HTTP %d", resp.StatusCode)
 	}
 
+	exePath := m.cloudflaredPath()
 	out, err := os.Create(exePath)
 	if err != nil {
 		return fmt.Errorf("cannot create file: %w", err)
@@ -128,8 +134,8 @@ func (m *Manager) URL() string {
 }
 
 // Start downloads cloudflared (if needed) and launches a quick tunnel.
-// It returns the public URL once cloudflared prints it, or an error.
-// The function blocks until the URL is obtained or a timeout occurs.
+// It returns the public URL once cloudflared prints it AND the tunnel
+// is verified reachable via an HTTP health check.
 func (m *Manager) Start() (string, error) {
 	m.mu.Lock()
 	if m.cmd != nil && m.cmd.Process != nil {
@@ -144,19 +150,23 @@ func (m *Manager) Start() (string, error) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
+	// --no-autoupdate prevents cloudflared from trying to self-update,
+	// which can hang the process on some systems.
 	cmd := exec.CommandContext(ctx, m.cloudflaredPath(),
-		"tunnel", "--url", "http://"+m.listen)
+		"tunnel", "--no-autoupdate", "--url", "http://"+m.listen)
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 
+	// cloudflared prints the tunnel URL to both stdout and stderr
+	// depending on version — capture both.
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		cancel()
-		return "", fmt.Errorf("pipe error: %w", err)
+		return "", fmt.Errorf("stdout pipe error: %w", err)
 	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		cancel()
-		return "", fmt.Errorf("pipe error: %w", err)
+		return "", fmt.Errorf("stderr pipe error: %w", err)
 	}
 
 	if err := cmd.Start(); err != nil {
@@ -172,17 +182,16 @@ func (m *Manager) Start() (string, error) {
 
 	log.Printf("tunnel: cloudflared started (PID %d), waiting for URL...", cmd.Process.Pid)
 
-	// cloudflared prints the tunnel URL to both stdout and stderr.
-	// Scan both until we find it.
-	urlCh := make(chan string, 1)
-	errCh := make(chan error, 1)
+	// Scan both stdout and stderr until we find the tunnel URL.
+	urlCh := make(chan string, 2)
+	exitCh := make(chan error, 1)
 
-	scan := func(reader io.Reader) {
+	scan := func(name string, reader io.Reader) {
 		scanner := bufio.NewScanner(reader)
 		scanner.Buffer(make([]byte, 0, 256*1024), 1024*1024)
 		for scanner.Scan() {
 			line := scanner.Text()
-			log.Printf("tunnel: %s", line)
+			log.Printf("tunnel[%s]: %s", name, line)
 			if match := tunnelURLPattern.FindString(line); match != "" {
 				select {
 				case urlCh <- match:
@@ -192,8 +201,8 @@ func (m *Manager) Start() (string, error) {
 		}
 	}
 
-	go scan(stdout)
-	go scan(stderr)
+	go scan("stdout", stdout)
+	go scan("stderr", stderr)
 
 	// Wait for process exit in background.
 	go func() {
@@ -204,23 +213,57 @@ func (m *Manager) Start() (string, error) {
 		m.cancel = nil
 		m.url = ""
 		m.mu.Unlock()
-		errCh <- err
+		exitCh <- err
 	}()
 
-	// Wait for URL or exit (whichever comes first), with a 30s timeout.
+	// Wait for URL or exit (whichever comes first), with a 60s timeout.
+	var tunnelURL string
 	select {
 	case url := <-urlCh:
-		m.mu.Lock()
-		m.url = url
-		m.mu.Unlock()
-		log.Printf("tunnel: public URL = %s", url)
-		return url, nil
-	case <-errCh:
-		return "", fmt.Errorf("cloudflared exited before establishing tunnel")
-	case <-time.After(30 * time.Second):
+		tunnelURL = url
+	case <-exitCh:
+		return "", fmt.Errorf("cloudflared exited before establishing tunnel — check proxy.log for details")
+	case <-time.After(60 * time.Second):
 		m.Stop()
-		return "", fmt.Errorf("timed out waiting for tunnel URL")
+		return "", fmt.Errorf("timed out after 60s waiting for tunnel URL — cloudflared may be blocked by a firewall")
 	}
+
+	// Health check: verify the tunnel is actually serving by hitting it.
+	log.Printf("tunnel: verifying reachability of %s", tunnelURL)
+	if err := m.healthCheck(tunnelURL); err != nil {
+		m.Stop()
+		return "", fmt.Errorf("tunnel URL obtained but not reachable: %w", err)
+	}
+
+	m.mu.Lock()
+	m.url = tunnelURL
+	m.mu.Unlock()
+	log.Printf("tunnel: public URL verified and active = %s", tunnelURL)
+	return tunnelURL, nil
+}
+
+// healthCheck pings the tunnel URL to confirm it is serving traffic.
+// It retries for up to 30 seconds since the tunnel may need a moment
+// to become fully active after the URL is printed.
+func (m *Manager) healthCheck(url string) error {
+	client := &http.Client{Timeout: 10 * time.Second}
+	for i := 0; i < 15; i++ {
+		resp, err := client.Get(url + "/v1/models")
+		if err == nil {
+			resp.Body.Close()
+			// Any non-5xx response means the tunnel is working (the proxy
+			// is receiving requests through the tunnel).
+			if resp.StatusCode < 500 {
+				log.Printf("tunnel: health check passed (HTTP %d)", resp.StatusCode)
+				return nil
+			}
+			log.Printf("tunnel: health check attempt %d got HTTP %d", i+1, resp.StatusCode)
+		} else {
+			log.Printf("tunnel: health check attempt %d failed: %v", i+1, err)
+		}
+		time.Sleep(2 * time.Second)
+	}
+	return fmt.Errorf("tunnel did not become reachable after 30 seconds")
 }
 
 // Stop terminates the cloudflared subprocess if running.

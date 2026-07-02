@@ -3,7 +3,7 @@
 !include "LogicLib.nsh"
 
 Name "Z-API Proxy ${APPVERSION}"
-OutFile "z-api-proxy-setup.exe"
+OutFile "z-api-proxy-win-setup.exe"
 InstallDir "$PROGRAMFILES64\Z-API-Proxy"
 RequestExecutionLevel admin
 Unicode True

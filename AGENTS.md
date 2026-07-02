@@ -52,11 +52,13 @@ main.go  ──> config.Manager (hot-reload, atomic.Pointer)
         ──> proxy.Proxy  (implements http.Handler)
         ──> http.Server  (runs in goroutine)
         ──> tray.Run()   (BLOCKING — main loop lives here)
+        ──> tunnel.Manager  (cloudflared subprocess, mutex-protected)
+        ──> updater          (GitHub release checker + MSI installer)
 ```
 
 - **`systray.Run` blocks** in `main`. The HTTP server runs in a goroutine. The app exits when the user clicks tray → Exit (`systray.Quit`), which triggers graceful server shutdown.
-- Concurrency is handled with `sync/atomic` exclusively (`atomic.Pointer[Config]`, `atomic.Bool`, `atomic.Int64`) — **there are no mutexes anywhere**. Preserve this pattern when adding shared state.
-- The tray spawns three long-lived goroutines (`updateTooltip`, `updateIcon`, `handleMenu`) that loop forever; `handleMenu` selects on channel clicks.
+- Concurrency is handled with `sync/atomic` for config/proxy/counter; the tunnel package uses a `sync.Mutex` (manages a subprocess with multi-step start/stop). Preserve the appropriate pattern per package.
+- The tray spawns goroutines: `updateTooltip`, `updateIcon`, `handleMenu`, and `checkForUpdates` (one-shot on startup).
 
 ### Request flow (`proxy.ServeHTTP`)
 
@@ -81,8 +83,11 @@ If you add a new field that needs rewriting, extend the field list in `rewriteMo
 ## Windows-Specific Code
 
 - `tray.go` calls `user32.dll` `MessageBoxW` directly via `syscall`/`unsafe` for native dialogs (test connection, errors). Do not port this to other platforms without replacing it.
-- Icons are embedded at compile time (`//go:embed assets/icon.ico`, `assets/icon-error.ico`).
+- Icons are embedded at compile time (`//go:embed assets/icon.ico`, `assets/icon-error.ico`). High-resolution versions (256x256 max) are generated from `scripts/gen_icons.py`.
 - `config.go` keys off `%APPDATA%` (falls back to `~/.config` only if unset — effectively Windows-only behavior).
+- `tunnel.go` downloads and caches `cloudflared.exe` in `%APPDATA%\Z-API-Proxy\`. The download URL picks `amd64` or `arm64` based on `runtime.GOARCH`.
+- `updater.go` downloads MSIs from GitHub releases and launches `msiexec /i <path>` — the WiX `MajorUpgrade` element handles replacing the old version.
+- Clipboard operations use `powershell Set-Clipboard` via `exec.Command`.
 
 ## Logging
 
@@ -90,7 +95,10 @@ Logs go to `%APPDATA%\Z-API-Proxy\proxy.log` (append mode), **not** stdout — t
 
 ## Conventions
 
-- Package layout: all logic under `internal/`, one package per concern (`config`, `proxy`, `counter`, `tray`). `main.go` is wiring only.
+- Package layout: all logic under `internal/`, one package per concern (`config`, `proxy`, `counter`, `tray`, `tunnel`, `updater`). `main.go` is wiring only.
 - `go.mod` module path is `z-api-proxy` (no domain prefix); internal imports use `z-api-proxy/internal/...`.
-- No dependencies beyond `pelletier/go-toml/v2` (config) and `getlantern/systray` (tray). Avoid adding dependencies unless necessary.
+- Dependencies: `pelletier/go-toml/v2` (config), `getlantern/systray` (tray), `golang.org/x/sys` (registry). Avoid adding dependencies unless necessary.
 - Style: short receiver names (`p *Proxy`, `m *Manager`, `t *trayApp`, `c *Counter`), exported constructors named `New`.
+- Version is managed via the `VERSION` file and injected at build time with `-X main.version=...`.
+- Release artifacts use `win` in their names (e.g. `z-api-proxy-win-1.0.0-alpha-amd64.msi`).
+- Tests: `go test ./...` runs unit tests in `config` and `updater`. The Python `test_smoke.py` is a separate integration test.

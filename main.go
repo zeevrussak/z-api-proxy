@@ -58,7 +58,7 @@ func main() {
 		}
 	}()
 
-	tray.Run(iconNormal, iconError, manager, ctr, px, configPath)
+	tray.Run(iconNormal, iconError, manager, ctr, px, configPath, version)
 
 	log.Println("shutting down")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

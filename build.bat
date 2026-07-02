@@ -59,22 +59,22 @@ set WIX_VARS=-d MsiVersion=%MSIVER% -d DisplayVersion=%VERSION%
 wix build installer.wxs -arch x64 %WIX_VARS% ^
     -d "BinPath=build\amd64\z-api-proxy.exe" ^
     -d UpgradeCode=18CAB0AD-AF9E-4C0B-AD01-99EF83004F7C ^
-    -o "releases\z-api-proxy-%VERSION%-amd64.msi"
+    -o "releases\z-api-proxy-win-%VERSION%-amd64.msi"
 if %ERRORLEVEL% neq 0 (
     echo FAILED: amd64 MSI
     exit /b 1
 )
-echo       z-api-proxy-%VERSION%-amd64.msi
+echo       z-api-proxy-win-%VERSION%-amd64.msi
 
 wix build installer.wxs -arch arm64 %WIX_VARS% ^
     -d "BinPath=build\arm64\z-api-proxy.exe" ^
     -d UpgradeCode=B7DE7313-6CBD-4BB4-8D65-91D23429F1DE ^
-    -o "releases\z-api-proxy-%VERSION%-arm64.msi"
+    -o "releases\z-api-proxy-win-%VERSION%-arm64.msi"
 if %ERRORLEVEL% neq 0 (
     echo FAILED: arm64 MSI
     exit /b 1
 )
-echo       z-api-proxy-%VERSION%-arm64.msi
+echo       z-api-proxy-win-%VERSION%-arm64.msi
 
 :: --- Build NSIS installer ---
 echo.
@@ -89,8 +89,8 @@ if %ERRORLEVEL% neq 0 (
     echo FAILED: NSIS build
     exit /b 1
 )
-move /Y z-api-proxy-setup.exe "releases\z-api-proxy-%VERSION%-setup.exe" >nul
-echo       z-api-proxy-%VERSION%-setup.exe
+move /Y z-api-proxy-win-setup.exe "releases\z-api-proxy-win-%VERSION%-setup.exe" >nul
+echo       z-api-proxy-win-%VERSION%-setup.exe
 
 :summary
 echo.

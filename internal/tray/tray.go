@@ -18,6 +18,8 @@ import (
 	"z-api-proxy/internal/config"
 	"z-api-proxy/internal/counter"
 	"z-api-proxy/internal/proxy"
+	"z-api-proxy/internal/tunnel"
+	"z-api-proxy/internal/updater"
 )
 
 var (
@@ -114,9 +116,12 @@ type trayApp struct {
 	counter    *counter.Counter
 	proxy      *proxy.Proxy
 	configPath string
+	tunnel     *tunnel.Manager
+	version    string
 }
 
-func Run(iconNormal, iconError []byte, manager *config.Manager, ctr *counter.Counter, px *proxy.Proxy, configPath string) {
+func Run(iconNormal, iconError []byte, manager *config.Manager, ctr *counter.Counter, px *proxy.Proxy, configPath string, version string) {
+	cfg := manager.Get()
 	app := &trayApp{
 		iconNormal: iconNormal,
 		iconError:  iconError,
@@ -124,6 +129,8 @@ func Run(iconNormal, iconError []byte, manager *config.Manager, ctr *counter.Cou
 		counter:    ctr,
 		proxy:      px,
 		configPath: configPath,
+		tunnel:     tunnel.New(cfg.Server.Listen),
+		version:    version,
 	}
 	systray.Run(app.onReady, app.onExit)
 }
@@ -143,8 +150,16 @@ func (t *trayApp) onReady() {
 
 	mConfig := systray.AddMenuItem("Configure...", "Open config.toml in Notepad")
 	mTest := systray.AddMenuItem("Test Connection", "Test upstream reachability")
-	mCopyURL := systray.AddMenuItem("Copy Base URL", "Copy the proxy base URL for Cursor")
+	mCopyURL := systray.AddMenuItem("Copy Base URL", "Copy the local proxy URL")
+	mTunnel := systray.AddMenuItem("Start Public Tunnel", "Expose proxy on a public URL for Cursor")
+	mCopyTunnel := systray.AddMenuItem("Copy Tunnel URL", "Copy the public tunnel URL")
+	mCopyTunnel.Disable()
 	mStartup := systray.AddMenuItemCheckbox("Start with Windows", "Launch Z-API Proxy when Windows starts", startupPref)
+
+	systray.AddSeparator()
+
+	mUpdate := systray.AddMenuItem("Update", "Check for updates")
+	mUpdate.Hide()
 
 	systray.AddSeparator()
 
@@ -152,7 +167,8 @@ func (t *trayApp) onReady() {
 
 	go t.updateTooltip()
 	go t.updateIcon()
-	go t.handleMenu(mConfig, mTest, mCopyURL, mStartup, mExit)
+	go t.handleMenu(mConfig, mTest, mCopyURL, mTunnel, mCopyTunnel, mStartup, mUpdate, mExit)
+	go t.checkForUpdates(mUpdate)
 }
 
 func (t *trayApp) onExit() {}
@@ -188,7 +204,7 @@ func (t *trayApp) updateIcon() {
 	}
 }
 
-func (t *trayApp) handleMenu(mConfig, mTest, mCopyURL, mStartup, mExit *systray.MenuItem) {
+func (t *trayApp) handleMenu(mConfig, mTest, mCopyURL, mTunnel, mCopyTunnel, mStartup, mUpdate, mExit *systray.MenuItem) {
 	for {
 		select {
 		case <-mConfig.ClickedCh:
@@ -202,6 +218,12 @@ func (t *trayApp) handleMenu(mConfig, mTest, mCopyURL, mStartup, mExit *systray.
 		case <-mCopyURL.ClickedCh:
 			go t.copyBaseURL()
 
+		case <-mTunnel.ClickedCh:
+			go t.toggleTunnel(mTunnel, mCopyTunnel)
+
+		case <-mCopyTunnel.ClickedCh:
+			go t.copyTunnelURL()
+
 		case <-mStartup.ClickedCh:
 			nowOn := !mStartup.Checked()
 			if nowOn {
@@ -212,11 +234,59 @@ func (t *trayApp) handleMenu(mConfig, mTest, mCopyURL, mStartup, mExit *systray.
 			saveStartupPref(nowOn)
 			setAutoStart(nowOn)
 
+		case <-mUpdate.ClickedCh:
+			go t.installUpdate(mUpdate)
+
 		case <-mExit.ClickedCh:
+			t.tunnel.Stop()
 			systray.Quit()
 			return
 		}
 	}
+}
+
+// toggleTunnel starts or stops the public tunnel. Starting is async because
+// it involves downloading cloudflared and waiting for the URL.
+func (t *trayApp) toggleTunnel(mTunnel, mCopyTunnel *systray.MenuItem) {
+	if t.tunnel.Running() {
+		t.tunnel.Stop()
+		mTunnel.SetTitle("Start Public Tunnel")
+		mCopyTunnel.Disable()
+		return
+	}
+
+	mTunnel.SetTitle("Starting tunnel...")
+	url, err := t.tunnel.Start()
+	if err != nil {
+		log.Printf("tunnel error: %v", err)
+		messageBox("Failed to start tunnel:\n"+err.Error(), "Z-API Proxy — Tunnel", mbIconError)
+		mTunnel.SetTitle("Start Public Tunnel")
+		return
+	}
+
+	mTunnel.SetTitle("Stop Public Tunnel")
+	mCopyTunnel.SetTitle("Copy Tunnel URL: " + url)
+	mCopyTunnel.Enable()
+
+	messageBox(fmt.Sprintf("Public tunnel is live!\n\n%s\n\nUse this URL in Cursor:\nSettings \u2192 Models \u2192 OpenAI API Base URL\n(Append /v1 to the URL)", url), "Z-API Proxy — Tunnel", mbIconInfo)
+}
+
+// copyTunnelURL writes the current public tunnel URL to the clipboard.
+func (t *trayApp) copyTunnelURL() {
+	url := t.tunnel.URL()
+	if url == "" {
+		return
+	}
+	tunnelURL := url + "/v1"
+
+	cmd := exec.Command("powershell", "-NoProfile", "-Command",
+		fmt.Sprintf("Set-Clipboard -Value '%s'", tunnelURL))
+	if err := cmd.Run(); err != nil {
+		log.Printf("clipboard error: %v", err)
+		return
+	}
+
+	messageBox(fmt.Sprintf("Copied to clipboard:\n\n%s", tunnelURL), "Z-API Proxy — Copy", mbIconInfo)
 }
 
 func (t *trayApp) testConnection() {
@@ -268,4 +338,50 @@ func (t *trayApp) copyBaseURL() {
 	}
 
 	messageBox(fmt.Sprintf("Copied to clipboard:\n\n%s\n\nPaste this into Cursor:\nSettings → Models → OpenAI API Base URL", baseURL), "Z-API Proxy — Copy", mbIconInfo)
+}
+
+// checkForUpdates queries GitHub for the latest release on startup.
+// If a newer version is found, the menu item is revealed with the version.
+func (t *trayApp) checkForUpdates(mUpdate *systray.MenuItem) {
+	if t.version == "dev" {
+		return
+	}
+
+	rel, err := updater.FetchLatest()
+	if err != nil {
+		log.Printf("updater: %v", err)
+		return
+	}
+	if !updater.IsNewer(t.version, rel.TagName) {
+		return
+	}
+
+	tagDisplay := strings.TrimPrefix(rel.TagName, "v")
+	mUpdate.SetTitle(fmt.Sprintf("Update Available! v%s (click to install)", tagDisplay))
+	mUpdate.Show()
+	log.Printf("updater: update available — %s (current: %s)", rel.TagName, t.version)
+}
+
+// installUpdate downloads and launches the MSI installer for the current
+// architecture. The app exits after launching so the installer can replace
+// files.
+func (t *trayApp) installUpdate(mUpdate *systray.MenuItem) {
+	mUpdate.SetTitle("Downloading update...")
+
+	rel, err := updater.FetchLatest()
+	if err != nil {
+		mUpdate.SetTitle("Update failed — see log")
+		log.Printf("updater: %v", err)
+		return
+	}
+
+	if err := rel.DownloadAndInstall(); err != nil {
+		mUpdate.SetTitle("Update failed — see log")
+		messageBox("Update download failed:\n"+err.Error(), "Z-API Proxy — Update", mbIconError)
+		return
+	}
+
+	messageBox("Update downloaded. The installer will now launch.\nThe app will exit and restart after installation.", "Z-API Proxy — Update", mbIconInfo)
+	t.tunnel.Stop()
+	systray.Quit()
 }

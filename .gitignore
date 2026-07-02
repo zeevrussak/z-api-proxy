@@ -1,0 +1,5 @@
+*.exe
+*.log
+*.msi
+z-api-proxy-setup.exe
+vendor/

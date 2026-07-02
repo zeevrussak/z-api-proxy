@@ -1,0 +1,38 @@
+# Z-API Proxy Configuration
+# This file is auto-created in %APPDATA%\Z-API-Proxy\config.toml on first run.
+# Edit it via the tray menu → Configure...
+
+[server]
+# Local listen address. Set this as the custom OpenAI base URL in Cursor.
+# In Cursor: Settings → Models → OpenAI API Base URL = http://127.0.0.1:8787/v1
+listen = "127.0.0.1:8787"
+
+[upstream]
+# z.ai API base URL
+base_url = "https://api.z.ai/api/paas/v4"
+
+# API key for z.ai. Leave empty to pass through from Cursor.
+api_key = ""
+
+# Model name mappings.
+# "from" = model name as sent by Cursor
+# "to"   = model name as expected by z.ai upstream
+[[models]]
+from = "z.ai/glm-5.2"
+to = "glm-5.2"
+
+[[models]]
+from = "z.ai/glm-4.6"
+to = "glm-4.6"
+
+[[models]]
+from = "z.ai/glm-5.2"
+to = "glm-5.2"
+
+[[models]]
+from = "z.ai/glm-5-turbo"
+to = "glm-5-turbo"
+
+[[models]]
+from = "z.ai/glm-5v-turbo"
+to = "glm-5v-turbo"

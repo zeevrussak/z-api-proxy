@@ -86,8 +86,10 @@ If you add a new field that needs rewriting, extend the field list in `rewriteMo
 - Icons are embedded at compile time (`//go:embed assets/icon.ico`, `assets/icon-error.ico`). High-resolution versions (256x256 max) are generated from `scripts/gen_icons.py`.
 - `config.go` keys off `%APPDATA%` (falls back to `~/.config` only if unset — effectively Windows-only behavior).
 - `tunnel.go` downloads and caches `cloudflared.exe` in `%APPDATA%\Z-API-Proxy\`. The download URL picks `amd64` or `arm64` based on `runtime.GOARCH`.
+- Tunnel preference persisted in `%APPDATA%\Z-API-Proxy\tunnel.pref` (`1`/`0`, default off). When enabled, auto-starts silently on launch via `autoStartTunnel` (no popup dialog).
 - `updater.go` downloads MSIs from GitHub releases and launches `msiexec /i <path>` — the WiX `MajorUpgrade` element handles replacing the old version.
 - Clipboard operations use `powershell Set-Clipboard` via `exec.Command`.
+- Contact Developer uses `rundll32 url.dll,FileProtocolHandler mailto:...` to open the default mail client.
 
 ## Logging
 

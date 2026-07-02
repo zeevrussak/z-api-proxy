@@ -92,8 +92,9 @@ to = "glm-4.6"
 | **Configure...** | Opens `config.toml` in Notepad for editing |
 | **Test Connection** | Pings the upstream `/models` endpoint and reports status |
 | **Copy Base URL** | Copies `http://127.0.0.1:8787/v1` to clipboard for Cursor |
-| **Start Public Tunnel** | Creates a public HTTPS URL via Cloudflare Quick Tunnel |
+| **Start Public Tunnel** | Creates a public HTTPS URL via Cloudflare Quick Tunnel. Auto-starts on next launch when enabled |
 | **Copy Tunnel URL** | Copies the active tunnel URL (with `/v1`) to clipboard |
+| **Contact Developer** | Opens your mail client to send feedback |
 | **Start with Windows** | Toggle autostart at login (on by default) |
 | **Update Available!** | Shows when a new release exists — click to download and install |
 | **Exit** | Quit the proxy |
@@ -118,6 +119,8 @@ Cursor  ──HTTPS──>  Cloudflare Tunnel  ──>  z-api-proxy (127.0.0.1:8
 The tunnel uses [cloudflared](https://github.com/cloudflare/cloudflared) (Apache 2.0 license). On first use, the proxy downloads `cloudflared.exe` (~50 MB) to `%APPDATA%\Z-API-Proxy\` and caches it. The tunnel creates a random `*.trycloudflare.com` URL that forwards to your local proxy. No Cloudflare account, API token, or configuration is needed.
 
 **Note:** Quick Tunnel URLs are ephemeral — they change each time the tunnel restarts. For a stable URL, consider running your own Cloudflare Named Tunnel.
+
+**Auto-start:** Once you enable the tunnel via the tray menu, it automatically starts on every app launch. The preference is stored in `%APPDATA%\Z-API-Proxy\tunnel.pref`. Disable it by clicking **Stop Public Tunnel**.
 
 ## Build from Source
 

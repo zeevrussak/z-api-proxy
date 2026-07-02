@@ -91,9 +91,8 @@ to = "glm-4.6"
 |------|-------------|
 | **Configure...** | Opens `config.toml` in Notepad for editing |
 | **Test Connection** | Pings the upstream `/models` endpoint and reports status |
-| **Copy Base URL** | Copies `http://127.0.0.1:8787/v1` to clipboard for Cursor |
+| **Copy Base URL** | Copies the active URL for Cursor — local `http://127.0.0.1:8787/v1` or public tunnel URL (auto-switches when tunnel is running) |
 | **Start Public Tunnel** | Creates a public HTTPS URL via Cloudflare Quick Tunnel. Auto-starts on next launch when enabled |
-| **Copy Tunnel URL** | Copies the active tunnel URL (with `/v1`) to clipboard |
 | **Contact Developer** | Opens your mail client to send feedback |
 | **Start with Windows** | Toggle autostart at login (on by default) |
 | **Update Available!** | Shows when a new release exists — click to download and install |

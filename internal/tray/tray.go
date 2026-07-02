@@ -174,10 +174,8 @@ func (t *trayApp) onReady() {
 
 	mConfig := systray.AddMenuItem("Configure...", "Open config.toml in Notepad")
 	mTest := systray.AddMenuItem("Test Connection", "Test upstream reachability")
-	mCopyURL := systray.AddMenuItem("Copy Base URL", "Copy the local proxy URL")
+	mCopyURL := systray.AddMenuItem("Copy Base URL", "Copy the proxy base URL for Cursor")
 	mTunnel := systray.AddMenuItem("Start Public Tunnel", "Expose proxy on a public URL for Cursor")
-	mCopyTunnel := systray.AddMenuItem("Copy Tunnel URL", "Copy the public tunnel URL")
-	mCopyTunnel.Disable()
 	mStartup := systray.AddMenuItemCheckbox("Start with Windows", "Launch Z-API Proxy when Windows starts", startupPref)
 
 	systray.AddSeparator()
@@ -193,12 +191,12 @@ func (t *trayApp) onReady() {
 
 	go t.updateTooltip()
 	go t.updateIcon()
-	go t.handleMenu(mConfig, mTest, mCopyURL, mTunnel, mCopyTunnel, mStartup, mUpdate, mContact, mExit)
+	go t.handleMenu(mConfig, mTest, mCopyURL, mTunnel, mStartup, mUpdate, mContact, mExit)
 	go t.checkForUpdates(mUpdate)
 
 	// Auto-start tunnel if previously enabled
 	if loadTunnelPref() {
-		go t.autoStartTunnel(mTunnel, mCopyTunnel)
+		go t.autoStartTunnel(mTunnel, mCopyURL)
 	}
 }
 
@@ -235,7 +233,7 @@ func (t *trayApp) updateIcon() {
 	}
 }
 
-func (t *trayApp) handleMenu(mConfig, mTest, mCopyURL, mTunnel, mCopyTunnel, mStartup, mUpdate, mContact, mExit *systray.MenuItem) {
+func (t *trayApp) handleMenu(mConfig, mTest, mCopyURL, mTunnel, mStartup, mUpdate, mContact, mExit *systray.MenuItem) {
 	for {
 		select {
 		case <-mConfig.ClickedCh:
@@ -247,13 +245,10 @@ func (t *trayApp) handleMenu(mConfig, mTest, mCopyURL, mTunnel, mCopyTunnel, mSt
 			go t.testConnection()
 
 		case <-mCopyURL.ClickedCh:
-			go t.copyBaseURL()
+			go t.copyBaseURL(mCopyURL)
 
 		case <-mTunnel.ClickedCh:
-			go t.toggleTunnel(mTunnel, mCopyTunnel)
-
-		case <-mCopyTunnel.ClickedCh:
-			go t.copyTunnelURL()
+			go t.toggleTunnel(mTunnel, mCopyURL)
 
 		case <-mStartup.ClickedCh:
 			nowOn := !mStartup.Checked()
@@ -284,12 +279,12 @@ func (t *trayApp) handleMenu(mConfig, mTest, mCopyURL, mTunnel, mCopyTunnel, mSt
 
 // toggleTunnel starts or stops the public tunnel. Starting is async because
 // it involves downloading cloudflared and waiting for the URL.
-func (t *trayApp) toggleTunnel(mTunnel, mCopyTunnel *systray.MenuItem) {
+func (t *trayApp) toggleTunnel(mTunnel, mCopyURL *systray.MenuItem) {
 	if t.tunnel.Running() {
 		t.tunnel.Stop()
 		saveTunnelPref(false)
 		mTunnel.SetTitle("Start Public Tunnel")
-		mCopyTunnel.Disable()
+		mCopyURL.SetTitle("Copy Base URL")
 		return
 	}
 
@@ -304,42 +299,22 @@ func (t *trayApp) toggleTunnel(mTunnel, mCopyTunnel *systray.MenuItem) {
 
 	saveTunnelPref(true)
 	mTunnel.SetTitle("Stop Public Tunnel")
-	mCopyTunnel.SetTitle("Copy Tunnel URL: " + url)
-	mCopyTunnel.Enable()
+	mCopyURL.SetTitle("Copy Public Tunnel URL")
 
-	messageBox(fmt.Sprintf("Public tunnel is live!\n\n%s\n\nUse this URL in Cursor:\nSettings \u2192 Models \u2192 OpenAI API Base URL\n(Append /v1 to the URL)", url), "Z-API Proxy — Tunnel", mbIconInfo)
+	messageBox(fmt.Sprintf("Public tunnel is live!\n\n%s/v1\n\nUse this URL in Cursor:\nSettings \u2192 Models \u2192 OpenAI API Base URL", url), "Z-API Proxy — Tunnel", mbIconInfo)
 }
 
 // autoStartTunnel is called on startup when the tunnel preference is enabled.
 // It starts the tunnel silently (no popup dialog on success).
-func (t *trayApp) autoStartTunnel(mTunnel, mCopyTunnel *systray.MenuItem) {
+func (t *trayApp) autoStartTunnel(mTunnel, mCopyURL *systray.MenuItem) {
 	url, err := t.tunnel.Start()
 	if err != nil {
 		log.Printf("tunnel auto-start error: %v", err)
 		return
 	}
 	mTunnel.SetTitle("Stop Public Tunnel")
-	mCopyTunnel.SetTitle("Copy Tunnel URL: " + url)
-	mCopyTunnel.Enable()
+	mCopyURL.SetTitle("Copy Public Tunnel URL")
 	log.Printf("tunnel auto-started: %s", url)
-}
-
-// copyTunnelURL writes the current public tunnel URL to the clipboard.
-func (t *trayApp) copyTunnelURL() {
-	url := t.tunnel.URL()
-	if url == "" {
-		return
-	}
-	tunnelURL := url + "/v1"
-
-	cmd := exec.Command("powershell", "-NoProfile", "-Command",
-		fmt.Sprintf("Set-Clipboard -Value '%s'", tunnelURL))
-	if err := cmd.Run(); err != nil {
-		log.Printf("clipboard error: %v", err)
-		return
-	}
-
-	messageBox(fmt.Sprintf("Copied to clipboard:\n\n%s", tunnelURL), "Z-API Proxy — Copy", mbIconInfo)
 }
 
 func (t *trayApp) testConnection() {
@@ -367,20 +342,23 @@ func (t *trayApp) testConnection() {
 	case resp.StatusCode == 200:
 		messageBox("Connection successful.\nUpstream is reachable and authenticated.", "Z-API Proxy — Test", mbIconInfo)
 	case resp.StatusCode == 401 || resp.StatusCode == 403:
-		// A 401/403 still proves the upstream is reachable — the server
-		// responded, it just requires credentials. When api_key is empty
-		// in config (pass-through mode) the test has no key to send.
 		messageBox("Upstream is reachable.\nHTTP 401 — authentication required.\nIf api_key is empty, the proxy passes through the key from Cursor at runtime.", "Z-API Proxy — Test", mbIconInfo)
 	default:
 		messageBox(fmt.Sprintf("Upstream is reachable.\nHTTP %d", resp.StatusCode), "Z-API Proxy — Test", mbIconWarning)
 	}
 }
 
-// copyBaseURL writes the proxy's OpenAI-compatible base URL to the Windows
-// clipboard via PowerShell, then shows a confirmation dialog.
-func (t *trayApp) copyBaseURL() {
-	cfg := t.manager.Get()
-	baseURL := fmt.Sprintf("http://%s/v1", cfg.Server.Listen)
+// copyBaseURL writes the active base URL to the Windows clipboard.
+// When the tunnel is running, copies the public tunnel URL; otherwise
+// copies the local proxy URL. Both include the /v1 suffix.
+func (t *trayApp) copyBaseURL(mCopyURL *systray.MenuItem) {
+	var baseURL string
+	if tunnelURL := t.tunnel.URL(); tunnelURL != "" {
+		baseURL = tunnelURL + "/v1"
+	} else {
+		cfg := t.manager.Get()
+		baseURL = fmt.Sprintf("http://%s/v1", cfg.Server.Listen)
+	}
 
 	cmd := exec.Command("powershell", "-NoProfile", "-Command",
 		fmt.Sprintf("Set-Clipboard -Value '%s'", baseURL))

@@ -17,17 +17,19 @@ api_key = ""
 # Model name mappings.
 # "from" = model name as sent by Cursor
 # "to"   = model name as expected by z.ai upstream
+
+# GLM-5 family
 [[models]]
 from = "z.ai/glm-5.2"
 to = "glm-5.2"
 
 [[models]]
-from = "z.ai/glm-4.6"
-to = "glm-4.6"
+from = "z.ai/glm-5.1"
+to = "glm-5.1"
 
 [[models]]
-from = "z.ai/glm-5.2"
-to = "glm-5.2"
+from = "z.ai/glm-5"
+to = "glm-5"
 
 [[models]]
 from = "z.ai/glm-5-turbo"
@@ -36,3 +38,42 @@ to = "glm-5-turbo"
 [[models]]
 from = "z.ai/glm-5v-turbo"
 to = "glm-5v-turbo"
+
+# GLM-4.7 family
+[[models]]
+from = "z.ai/glm-4.7"
+to = "glm-4.7"
+
+[[models]]
+from = "z.ai/glm-4.7-flash"
+to = "glm-4.7-flash"
+
+[[models]]
+from = "z.ai/glm-4.7-flashx"
+to = "glm-4.7-flashx"
+
+# GLM-4.6 family
+[[models]]
+from = "z.ai/glm-4.6"
+to = "glm-4.6"
+
+[[models]]
+from = "z.ai/glm-4.6v"
+to = "glm-4.6v"
+
+# GLM-4.5 family
+[[models]]
+from = "z.ai/glm-4.5"
+to = "glm-4.5"
+
+[[models]]
+from = "z.ai/glm-4.5-air"
+to = "glm-4.5-air"
+
+[[models]]
+from = "z.ai/glm-4.5-flash"
+to = "glm-4.5-flash"
+
+[[models]]
+from = "z.ai/glm-4.5v"
+to = "glm-4.5v"

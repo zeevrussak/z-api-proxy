@@ -86,8 +86,8 @@ func (c *Config) ReverseMap() map[string]string {
 	return m
 }
 
-// CreateDefault writes a starter config file with built-in model mappings
-// (z.ai/glm-5.2 and z.ai/glm-4.6) to the given path.
+// CreateDefault writes a starter config file with all known z.ai model
+// mappings to the given path.
 func CreateDefault(path string) error {
 	content := `# Z-API Proxy Configuration
 
@@ -104,13 +104,66 @@ api_key = ""
 
 # Model name mappings.
 # Cursor sends "from", proxy rewrites to "to" before forwarding upstream.
+
+# GLM-5 family
 [[models]]
 from = "z.ai/glm-5.2"
 to = "glm-5.2"
 
 [[models]]
+from = "z.ai/glm-5.1"
+to = "glm-5.1"
+
+[[models]]
+from = "z.ai/glm-5"
+to = "glm-5"
+
+[[models]]
+from = "z.ai/glm-5-turbo"
+to = "glm-5-turbo"
+
+[[models]]
+from = "z.ai/glm-5v-turbo"
+to = "glm-5v-turbo"
+
+# GLM-4.7 family
+[[models]]
+from = "z.ai/glm-4.7"
+to = "glm-4.7"
+
+[[models]]
+from = "z.ai/glm-4.7-flash"
+to = "glm-4.7-flash"
+
+[[models]]
+from = "z.ai/glm-4.7-flashx"
+to = "glm-4.7-flashx"
+
+# GLM-4.6 family
+[[models]]
 from = "z.ai/glm-4.6"
-to = "glm-4.6"`
+to = "glm-4.6"
+
+[[models]]
+from = "z.ai/glm-4.6v"
+to = "glm-4.6v"
+
+# GLM-4.5 family
+[[models]]
+from = "z.ai/glm-4.5"
+to = "glm-4.5"
+
+[[models]]
+from = "z.ai/glm-4.5-air"
+to = "glm-4.5-air"
+
+[[models]]
+from = "z.ai/glm-4.5-flash"
+to = "glm-4.5-flash"
+
+[[models]]
+from = "z.ai/glm-4.5v"
+to = "glm-4.5v"`
 	return os.WriteFile(path, []byte(content), 0644)
 }
 

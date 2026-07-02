@@ -158,7 +158,7 @@ func TestCreateDefault(t *testing.T) {
 	if cfg.Upstream.BaseURL != "https://api.z.ai/api/paas/v4" {
 		t.Errorf("BaseURL = %q, want https://api.z.ai/api/paas/v4", cfg.Upstream.BaseURL)
 	}
-	if len(cfg.Models) != 2 {
-		t.Fatalf("Models length = %d, want 2", len(cfg.Models))
+	if len(cfg.Models) != 14 {
+		t.Fatalf("Models length = %d, want 14", len(cfg.Models))
 	}
 }

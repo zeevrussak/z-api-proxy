@@ -22,6 +22,7 @@ import (
 	"regexp"
 	"runtime"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -145,6 +146,7 @@ func (m *Manager) Start() (string, error) {
 
 	cmd := exec.CommandContext(ctx, m.cloudflaredPath(),
 		"tunnel", "--url", "http://"+m.listen)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

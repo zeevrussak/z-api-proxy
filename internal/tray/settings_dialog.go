@@ -37,12 +37,14 @@ const (
 	lbGetCount       = 0x018B
 	lbGetCurSel      = 0x0188
 	bmGetCheck       = 0x00F0
+	bmSetCheck       = 0x00F1
 	bstChecked       = 1
 	wsVscroll        = 0x00200000
 	wsBorder         = 0x00800000
 	wsThickframe     = 0x00040000
 	wsMinimizeBox    = 0x00020000
 	wsMaximizeBox    = 0x00010000
+	wsTabstop        = 0x00010000
 
 	gwlStyle          = ^uintptr(15) + 1 // -16 as uintptr
 	bsAutocheckbox    = 0x00000003
@@ -51,7 +53,7 @@ const (
 	wmSize      = 0x0005
 	wmSetIcon   = 0x0080
 	wmMouseWheel = 0x020A
-	wsGroup       = 0x00020000 // WS_GROUP for radio button grouping
+	wsGroup       = 0x00020000
 	wmVscroll    = 0x0115
 	sizeRestored = 0
 
@@ -559,7 +561,7 @@ func showSettingsDialog(cfg *config.Config, configPath string, iconBytes []byte)
 	createEdit := func(id int, text string, x, y, w, h uintptr, password bool) uintptr {
 		editClass, _ := syscall.UTF16PtrFromString("Edit")
 		val, _ := syscall.UTF16PtrFromString(text)
-		style := wsChild | wsVisible | esAutohscroll | wsBorder
+		style := wsChild | wsVisible | esAutohscroll | wsBorder | wsTabstop
 		if password {
 			style |= esPassword
 		}
@@ -625,7 +627,7 @@ func showSettingsDialog(cfg *config.Config, configPath string, iconBytes []byte)
 	yPos += gap
 	createSection("Security", &yPos)
 	verifyLabel, _ := syscall.UTF16PtrFromString("Verify API Key — always enabled (required for security)")
-	verifyStyle := wsChild | wsVisible | bsAutocheckbox | bstChecked | wsDisabled
+	verifyStyle := wsChild | wsVisible | bsAutocheckbox | wsDisabled
 	hwndVerify, _, _ := pCreateWindowExW.Call(
 		0, uintptr(unsafe.Pointer(btnClass)), uintptr(unsafe.Pointer(verifyLabel)),
 		uintptr(verifyStyle),
@@ -633,6 +635,7 @@ func showSettingsDialog(cfg *config.Config, configPath string, iconBytes []byte)
 		hwnd, idVerifyChk, 0, 0,
 	)
 	pSendMessageW.Call(hwndVerify, wmSetFont, fontHandle, 1)
+	pSendMessageW.Call(hwndVerify, bmSetCheck, bstChecked, 0)
 	yPos += ch + gap
 
 	// ── Tunnel section ──
@@ -640,10 +643,7 @@ func showSettingsDialog(cfg *config.Config, configPath string, iconBytes []byte)
 	createSection("Tunnel", &yPos)
 	isNamed := cfg.Tunnel.Mode == "named"
 	quickLabel, _ := syscall.UTF16PtrFromString("Quick (ephemeral URL)")
-	quickStyle := wsChild | wsVisible | bsAutoradioButton | wsGroup
-	if !isNamed {
-		quickStyle |= bstChecked
-	}
+	quickStyle := wsChild | wsVisible | bsAutoradioButton | wsGroup | wsTabstop
 	hwndQuick, _, _ := pCreateWindowExW.Call(
 		0, uintptr(unsafe.Pointer(btnClass)), uintptr(unsafe.Pointer(quickLabel)),
 		uintptr(quickStyle),
@@ -651,12 +651,12 @@ func showSettingsDialog(cfg *config.Config, configPath string, iconBytes []byte)
 		hwnd, idTunnelQuick, 0, 0,
 	)
 	pSendMessageW.Call(hwndQuick, wmSetFont, fontHandle, 1)
+	if !isNamed {
+		pSendMessageW.Call(hwndQuick, bmSetCheck, bstChecked, 0)
+	}
 	yPos += ch + gap
 	namedLabel, _ := syscall.UTF16PtrFromString("Named (stable URL)")
-	namedStyle := wsChild | wsVisible | bsAutoradioButton
-	if isNamed {
-		namedStyle |= bstChecked
-	}
+	namedStyle := wsChild | wsVisible | bsAutoradioButton | wsTabstop
 	hwndNamed, _, _ := pCreateWindowExW.Call(
 		0, uintptr(unsafe.Pointer(btnClass)), uintptr(unsafe.Pointer(namedLabel)),
 		uintptr(namedStyle),
@@ -664,9 +664,15 @@ func showSettingsDialog(cfg *config.Config, configPath string, iconBytes []byte)
 		hwnd, idTunnelNamed, 0, 0,
 	)
 	pSendMessageW.Call(hwndNamed, wmSetFont, fontHandle, 1)
+	if isNamed {
+		pSendMessageW.Call(hwndNamed, bmSetCheck, bstChecked, 0)
+	}
 	yPos += ch + gap
 	createLabel("Token:", mx, yPos, lw, ch)
 	hwndToken := createEdit(idTokenEd, cfg.Tunnel.Token, mx+lw+gap, yPos, fw, ch, true)
+	// WS_GROUP on this edit closes the radio button group above.
+	style, _, _ := pGetWindowLong.Call(hwndToken, gwlStyle)
+	pSetWindowLong.Call(hwndToken, gwlStyle, style|wsGroup|wsTabstop)
 	addLayout(hwndToken, lfStretch)
 	yPos += ch + gap
 	createLabel("Hostname:", mx, yPos, lw, ch)

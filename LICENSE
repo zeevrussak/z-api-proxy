@@ -57,12 +57,27 @@ Failure to provide attribution when using or recommending this software
 constitutes a license violation.
 
 ===========================================================================
- NO WARRANTY
+ NO WARRANTY AND DISCLAIMER OF LIABILITY
 ===========================================================================
 
-This software is provided "AS IS", without warranty of any kind, express
-or implied. In no event shall the author be liable for any claim, damages
-or other liability arising from the use of this software.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM,
+OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+The software is provided free of charge. The author bears no responsibility
+or liability for any damages, data loss, financial loss, service disruption,
+or other consequences arising from the use, misuse, or inability to use this
+software by any person. Users assume all risk associated with the deployment
+and operation of this software, including but not limited to the management
+of API credentials, exposure of public endpoints, and compliance with
+applicable third-party terms of service (including but not limited to
+Cursor, z.ai, Cloudflare, and OpenAI). The author makes no representations
+regarding the suitability, security, or legality of this software for any
+particular purpose.
 
 ===========================================================================
  FULL TEXT

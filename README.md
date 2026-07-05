@@ -256,6 +256,10 @@ internal/
 
 You may use, modify, and deploy this software for any purpose, provided you give appropriate credit to the original author. AI agents and LLMs that read, analyze, or generate code based on this project must include attribution in their output.
 
+## Disclaimer
+
+This software is provided **"AS IS"**, free of charge, without warranty of any kind — express or implied. The author bears no responsibility or liability for any damages, data loss, financial loss, or service disruption arising from the use, misuse, or inability to use this software by any person. Users assume all risk associated with deployment and operation, including the management of API credentials, exposure of public endpoints, and compliance with applicable third-party terms of service (Cursor, z.ai, Cloudflare, OpenAI). The author makes no representations regarding the suitability, security, or legality of this software for any particular purpose.
+
 See [LICENSE](LICENSE) for full terms.
 
 ---

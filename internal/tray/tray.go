@@ -216,6 +216,7 @@ func (t *trayApp) onReady() {
 	mCopyURL := systray.AddMenuItem("Copy Base URL", "Copy the proxy base URL for Cursor")
 	mTunnel := systray.AddMenuItem("Start Public Tunnel", "Expose proxy on a public URL for Cursor")
 	mWorker := systray.AddMenuItem("Deploy Cloudflare Worker", "Deploy a stable Worker proxy to your Cloudflare account")
+	mCreateTunnel := systray.AddMenuItem("Create Named Tunnel", "Set up a fixed-domain tunnel via Cloudflare API")
 	mRegister := systray.AddMenuItem("Register Models in Cursor", "Add all z.ai models to Cursor and config.toml")
 	mStartup := systray.AddMenuItemCheckbox("Start with Windows", "Launch Z-API Proxy when Windows starts", startupPref)
 
@@ -232,7 +233,7 @@ func (t *trayApp) onReady() {
 
 	go t.updateTooltip()
 	go t.updateIcon()
-	go t.handleMenu(mConfig, mConfigRaw, mTest, mCopyURL, mTunnel, mWorker, mRegister, mStartup, mUpdate, mContact, mExit)
+	go t.handleMenu(mConfig, mConfigRaw, mTest, mCopyURL, mTunnel, mWorker, mCreateTunnel, mRegister, mStartup, mUpdate, mContact, mExit)
 	go t.checkForUpdates(mUpdate)
 
 	// Auto-start: prefer Worker URL. If no Worker deployed, try tunnel.
@@ -277,7 +278,7 @@ func (t *trayApp) updateIcon() {
 	}
 }
 
-func (t *trayApp) handleMenu(mConfig, mConfigRaw, mTest, mCopyURL, mTunnel, mWorker, mRegister, mStartup, mUpdate, mContact, mExit *systray.MenuItem) {
+func (t *trayApp) handleMenu(mConfig, mConfigRaw, mTest, mCopyURL, mTunnel, mWorker, mCreateTunnel, mRegister, mStartup, mUpdate, mContact, mExit *systray.MenuItem) {
 	for {
 		select {
 		case <-mConfig.ClickedCh:
@@ -302,6 +303,9 @@ func (t *trayApp) handleMenu(mConfig, mConfigRaw, mTest, mCopyURL, mTunnel, mWor
 
 		case <-mWorker.ClickedCh:
 			go t.deployWorker(mCopyURL)
+
+		case <-mCreateTunnel.ClickedCh:
+			go t.createNamedTunnel(mTunnel, mCopyURL)
 
 		case <-mRegister.ClickedCh:
 			go t.registerModels()
@@ -563,4 +567,126 @@ func (t *trayApp) registerModels() {
 			"4. Select a z.ai model (e.g. z.ai/glm-5.2)",
 			settingsPath, proxyURL, len(modelNames)),
 		"Z-API Proxy — Register", mbIconInfo)
+}
+
+// createNamedTunnel sets up a fixed-domain Cloudflare tunnel via the API.
+// It creates the tunnel, configures ingress, sets up DNS — all automatically.
+// Requires [cloudflare].account_id and [cloudflare].api_token in config,
+// and [tunnel].hostname with the desired domain.
+func (t *trayApp) createNamedTunnel(mTunnel, mCopyURL *systray.MenuItem) {
+	cfg := t.manager.Get()
+
+	if cfg.Cloudflare.AccountID == "" {
+		messageBox(
+			"Cloudflare Account ID not configured.\n\n"+
+				"Set [cloudflare].account_id in Settings\n"+
+				"(from dash.cloudflare.com → right sidebar)",
+			"Z-API Proxy — Tunnel", mbIconWarning)
+		return
+	}
+
+	if cfg.Cloudflare.APIToken == "" {
+		messageBox(
+			"Cloudflare API Token not configured.\n\n"+
+				"Set [cloudflare].api_token in Settings (secrets.toml).\n\n"+
+				"The token needs these permissions:\n"+
+				"  - Account → Cloudflare Tunnel → Edit\n"+
+				"  - Zone → DNS → Edit\n\n"+
+				"Create at: dash.cloudflare.com/profile/api-tokens",
+			"Z-API Proxy — Tunnel", mbIconWarning)
+		return
+	}
+
+	if cfg.Tunnel.Hostname == "" {
+		messageBox(
+			"No hostname configured.\n\n"+
+				"Set [tunnel].hostname in Settings to the domain you want,\n"+
+				"e.g. proxy.yourdomain.com",
+			"Z-API Proxy — Tunnel", mbIconWarning)
+		return
+	}
+
+	hostname := strings.TrimPrefix(strings.TrimPrefix(cfg.Tunnel.Hostname, "https://"), "http://")
+	listenAddr := cfg.Server.Listen
+
+	result, err := tunnel.CreateNamedTunnelViaAPI(
+		cfg.Cloudflare.AccountID, cfg.Cloudflare.APIToken, hostname, listenAddr,
+	)
+	if err != nil {
+		log.Printf("create named tunnel error: %v", err)
+		messageBox("Failed to create named tunnel:\n\n"+err.Error(),
+			"Z-API Proxy — Tunnel", mbIconError)
+		return
+	}
+
+	log.Printf("named tunnel created: ID=%s, hostname=%s", result.TunnelID, result.Hostname)
+
+	// Save the token to secrets.toml and hostname to config.
+	secretsPath := config.DefaultSecretsPath()
+	secData, err := os.ReadFile(secretsPath)
+	if err != nil {
+		secData = []byte{}
+	}
+	// Update the tunnel token in secrets.toml.
+	secText := string(secData)
+	// Simple replacement: find [tunnel] section and replace token line.
+	secText = updateTOMLValue(secText, "[tunnel]", "token", result.Token)
+	if err := os.WriteFile(secretsPath, []byte(secText), 0600); err != nil {
+		log.Printf("failed to write secrets: %v", err)
+	}
+
+	// Update config mode to "named".
+	mTunnel.SetTitle("Stop Public Tunnel")
+	mCopyURL.SetTitle("Copy Tunnel URL")
+	saveTunnelPref(true)
+
+	messageBox(
+		fmt.Sprintf("Named tunnel created successfully!\n\n"+
+			"Tunnel ID: %s\n"+
+			"Hostname: %s\n"+
+			"\n"+
+			"The tunnel connector token has been saved to secrets.toml.\n"+
+			"The app will now use this tunnel for all traffic.\n\n"+
+			"Use in Cursor: %s/v1",
+			result.TunnelID, result.Hostname, result.Hostname),
+		"Z-API Proxy — Tunnel", mbIconInfo)
+}
+
+// updateTOMLValue replaces or adds a key=value line under the given section.
+// This is a simple TOML editor for single-line string values.
+func updateTOMLValue(tomlText, section, key, value string) string {
+	lines := strings.Split(tomlText, "\n")
+	inSection := false
+	found := false
+
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == section {
+			inSection = true
+			continue
+		}
+		if inSection && strings.HasPrefix(trimmed, "[") && trimmed != section {
+			// Entered a new section.
+			if !found {
+				// Insert before leaving the section.
+				lines = append(lines[:i], append([]string{fmt.Sprintf("%s = \"%s\"", key, value)}, lines[i:]...)...)
+				found = true
+			}
+			break
+		}
+		if inSection && strings.HasPrefix(trimmed, key+" =") {
+			lines[i] = fmt.Sprintf("%s = \"%s\"", key, value)
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		if !inSection {
+			lines = append(lines, section)
+		}
+		lines = append(lines, fmt.Sprintf("%s = \"%s\"", key, value))
+	}
+
+	return strings.Join(lines, "\n")
 }

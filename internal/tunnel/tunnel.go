@@ -11,7 +11,11 @@ package tunnel
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -347,4 +351,232 @@ func (m *Manager) Stop() {
 	m.cancel = nil
 	m.url = ""
 	log.Printf("tunnel: stopped")
+}
+
+// TunnelCreationResult holds the result of creating a named tunnel via API.
+type TunnelCreationResult struct {
+	TunnelID string
+	Token    string // The connector token for cloudflared
+	Hostname string // The public hostname that routes to the tunnel
+}
+
+const cfAPIBase = "https://api.cloudflare.com/client/v4"
+
+// CreateNamedTunnelViaAPI creates a Cloudflare Named Tunnel via the REST API,
+// configures ingress rules, and sets up DNS — all automatically.
+//
+// The API token needs these permissions:
+//   - Account → Cloudflare Tunnel → Edit
+//   - Zone → DNS → Edit
+//
+// Parameters:
+//   - accountID: Cloudflare account ID
+//   - apiToken: Cloudflare API token with the permissions above
+//   - hostname: desired public hostname (e.g. "proxy.yourdomain.com")
+//   - listenAddr: local address the proxy listens on (e.g. "127.0.0.1:8787")
+func CreateNamedTunnelViaAPI(accountID, apiToken, hostname, listenAddr string) (*TunnelCreationResult, error) {
+	client := &http.Client{Timeout: 30 * time.Second}
+
+	// 1. Generate a tunnel secret (32 bytes, base64).
+	secretBytes := make([]byte, 32)
+	if _, err := rand.Read(secretBytes); err != nil {
+		return nil, fmt.Errorf("cannot generate tunnel secret: %w", err)
+	}
+	tunnelSecret := base64.StdEncoding.EncodeToString(secretBytes)
+
+	// 2. Extract domain from hostname for zone lookup.
+	// e.g. "proxy.example.com" → "example.com"
+	domainParts := strings.SplitN(hostname, ".", 2)
+	if len(domainParts) < 2 {
+		return nil, fmt.Errorf("invalid hostname %q — must be like proxy.yourdomain.com", hostname)
+	}
+	domain := domainParts[1]
+	// Strip https:// prefix if present.
+	hostname = strings.TrimPrefix(hostname, "https://")
+	hostname = strings.TrimPrefix(hostname, "http://")
+
+	// 3. Create the tunnel.
+	tunnelName := "z-api-proxy"
+	createBody, _ := json.Marshal(map[string]string{
+		"name":          tunnelName,
+		"tunnel_secret": tunnelSecret,
+		"config_src":    "cloudflare",
+	})
+
+	createURL := fmt.Sprintf("%s/accounts/%s/cfd_tunnel", cfAPIBase, accountID)
+	req, _ := http.NewRequest("POST", createURL, bytes.NewReader(createBody))
+	req.Header.Set("Authorization", "Bearer "+apiToken)
+	req.Header.Set("Content-Type", "application/json")
+
+	log.Printf("tunnel-api: creating named tunnel '%s'...", tunnelName)
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("create tunnel API call failed: %w", err)
+	}
+	respBody, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("create tunnel returned HTTP %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var createResult struct {
+		Result struct {
+			ID          string `json:"id"`
+			ConnectToken string `json:"connect_token"`
+		} `json:"result"`
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+	if err := json.Unmarshal(respBody, &createResult); err != nil {
+		return nil, fmt.Errorf("cannot parse tunnel creation response: %w", err)
+	}
+	if createResult.Result.ID == "" {
+		return nil, fmt.Errorf("tunnel created but no ID returned: %s", string(respBody))
+	}
+	tunnelID := createResult.Result.ID
+	token := createResult.Result.ConnectToken
+
+	if token == "" {
+		// Some API versions return the token differently — try the connector token endpoint.
+		tokenURL := fmt.Sprintf("%s/accounts/%s/cfd_tunnel/%s/token", cfAPIBase, accountID, tunnelID)
+		tokReq, _ := http.NewRequest("GET", tokenURL, nil)
+		tokReq.Header.Set("Authorization", "Bearer "+apiToken)
+		tokResp, err := client.Do(tokReq)
+		if err == nil {
+			tokBody, _ := io.ReadAll(tokResp.Body)
+			tokResp.Body.Close()
+			var tokResult struct {
+				Result string `json:"result"`
+			}
+			json.Unmarshal(tokBody, &tokResult)
+			token = tokResult.Result
+		}
+	}
+
+	if token == "" {
+		return nil, fmt.Errorf("tunnel created (ID: %s) but could not obtain connector token", tunnelID)
+	}
+
+	log.Printf("tunnel-api: tunnel created, ID=%s", tunnelID)
+
+	// 4. Configure ingress rules (hostname → localhost:8787).
+	ingressBody, _ := json.Marshal(map[string]interface{}{
+		"config": map[string]interface{}{
+			"ingress": []map[string]interface{}{
+				{
+					"hostname": hostname,
+					"service":  "http://" + listenAddr,
+				},
+				{
+					"service": "http_status:404",
+				},
+			},
+		},
+	})
+
+	ingressURL := fmt.Sprintf("%s/accounts/%s/cfd_tunnel/%s/configurations", cfAPIBase, accountID, tunnelID)
+	ingReq, _ := http.NewRequest("PUT", ingressURL, bytes.NewReader(ingressBody))
+	ingReq.Header.Set("Authorization", "Bearer "+apiToken)
+	ingReq.Header.Set("Content-Type", "application/json")
+
+	log.Printf("tunnel-api: configuring ingress %s → http://%s...", hostname, listenAddr)
+	ingResp, err := client.Do(ingReq)
+	if err != nil {
+		return nil, fmt.Errorf("configure ingress failed: %w", err)
+	}
+	ingResp.Body.Close()
+
+	if ingResp.StatusCode != http.StatusOK {
+		ingRespBody, _ := io.ReadAll(ingResp.Body)
+		return nil, fmt.Errorf("configure ingress returned HTTP %d: %s", ingResp.StatusCode, string(ingRespBody))
+	}
+
+	log.Printf("tunnel-api: ingress configured")
+
+	// 5. Look up the zone ID for the domain.
+	zoneURL := fmt.Sprintf("%s/zones?name=%s", cfAPIBase, domain)
+	zoneReq, _ := http.NewRequest("GET", zoneURL, nil)
+	zoneReq.Header.Set("Authorization", "Bearer "+apiToken)
+	zoneResp, err := client.Do(zoneReq)
+	if err != nil {
+		return nil, fmt.Errorf("zone lookup failed: %w", err)
+	}
+	zoneBody, _ := io.ReadAll(zoneResp.Body)
+	zoneResp.Body.Close()
+
+	var zoneResult struct {
+		Result []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(zoneBody, &zoneResult); err != nil || len(zoneResult.Result) == 0 {
+		return nil, fmt.Errorf("could not find zone for domain %q — ensure the domain is added to your Cloudflare account", domain)
+	}
+	zoneID := zoneResult.Result[0].ID
+
+	// 6. Create or update DNS CNAME record pointing to the tunnel.
+	cnameTarget := fmt.Sprintf("%s.cfargotunnel.com", tunnelID)
+
+	// Check if a record already exists.
+	dnsURL := fmt.Sprintf("%s/zones/%s/dns_records?name=%s", cfAPIBase, zoneID, hostname)
+	dnsReq, _ := http.NewRequest("GET", dnsURL, nil)
+	dnsReq.Header.Set("Authorization", "Bearer "+apiToken)
+	dnsResp, err := client.Do(dnsReq)
+	if err == nil {
+		dnsRespBody, _ := io.ReadAll(dnsResp.Body)
+		dnsResp.Body.Close()
+		var existingDNS struct {
+			Result []struct {
+				ID string `json:"id"`
+			} `json:"result"`
+		}
+		json.Unmarshal(dnsRespBody, &existingDNS)
+		if len(existingDNS.Result) > 0 {
+			// Delete existing record, we'll recreate it.
+			for _, rec := range existingDNS.Result {
+				delURL := fmt.Sprintf("%s/zones/%s/dns_records/%s", cfAPIBase, zoneID, rec.ID)
+				delReq, _ := http.NewRequest("DELETE", delURL, nil)
+				delReq.Header.Set("Authorization", "Bearer "+apiToken)
+				delResp, err := client.Do(delReq)
+				if err == nil {
+					delResp.Body.Close()
+				}
+			}
+			log.Printf("tunnel-api: removed existing DNS records for %s", hostname)
+		}
+	}
+
+	dnsCreateBody, _ := json.Marshal(map[string]interface{}{
+		"type":    "CNAME",
+		"name":    hostname,
+		"content": cnameTarget,
+		"proxied": true,
+	})
+	dnsCreateURL := fmt.Sprintf("%s/zones/%s/dns_records", cfAPIBase, zoneID)
+	dnsCreateReq, _ := http.NewRequest("POST", dnsCreateURL, bytes.NewReader(dnsCreateBody))
+	dnsCreateReq.Header.Set("Authorization", "Bearer "+apiToken)
+	dnsCreateReq.Header.Set("Content-Type", "application/json")
+
+	log.Printf("tunnel-api: creating DNS CNAME %s → %s...", hostname, cnameTarget)
+	dnsCreateResp, err := client.Do(dnsCreateReq)
+	if err != nil {
+		return nil, fmt.Errorf("DNS record creation failed: %w", err)
+	}
+	dnsCreateRespBody, _ := io.ReadAll(dnsCreateResp.Body)
+	dnsCreateResp.Body.Close()
+
+	if dnsCreateResp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("DNS creation returned HTTP %d: %s", dnsCreateResp.StatusCode, string(dnsCreateRespBody))
+	}
+
+	log.Printf("tunnel-api: DNS record created — %s → %s", hostname, cnameTarget)
+
+	return &TunnelCreationResult{
+		TunnelID: tunnelID,
+		Token:    token,
+		Hostname: "https://" + hostname,
+	}, nil
 }

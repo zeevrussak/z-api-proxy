@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -136,11 +135,11 @@ func (r *Release) DownloadAndInstall() error {
 		return fmt.Errorf("download returned HTTP %d", resp.StatusCode)
 	}
 
-	msiPath := filepath.Join(os.TempDir(), "z-api-proxy-update.msi")
-	out, err := os.Create(msiPath)
+	out, err := os.CreateTemp(os.TempDir(), "z-api-proxy-update-*.msi")
 	if err != nil {
 		return fmt.Errorf("cannot create temp file: %w", err)
 	}
+	msiPath := out.Name()
 	if _, err := io.Copy(out, resp.Body); err != nil {
 		os.Remove(msiPath)
 		return fmt.Errorf("download write failed: %w", err)

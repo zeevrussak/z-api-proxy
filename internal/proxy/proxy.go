@@ -11,6 +11,7 @@ package proxy
 import (
 	"bufio"
 	"bytes"
+	"crypto/subtle"
 	"io"
 	"log"
 	"net/http"
@@ -84,13 +85,17 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Security: verify the caller's API key matches the configured key.
 	if cfg.Security.VerifyKey && cfg.Upstream.APIKey != "" {
 		auth := r.Header.Get("Authorization")
-		if auth != "Bearer "+cfg.Upstream.APIKey {
+		expected := "Bearer " + cfg.Upstream.APIKey
+		if subtle.ConstantTimeCompare([]byte(auth), []byte(expected)) != 1 {
 			p.counter.IncRejected()
 			http.Error(w, "unauthorized: API key mismatch", http.StatusUnauthorized)
 			return
 		}
 	}
 
+	// Limit request body to prevent memory exhaustion (100 MB max).
+	const maxBodySize = 100 << 20
+	r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
 	body, err := io.ReadAll(r.Body)
 	r.Body.Close()
 	if err != nil {
@@ -133,7 +138,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		p.counter.IncRejected()
 		p.hasErr.Store(true)
 		log.Printf("upstream error: %v", err)
-		http.Error(w, "upstream unreachable: "+err.Error(), http.StatusBadGateway)
+		http.Error(w, "upstream unreachable", http.StatusBadGateway)
 		return
 	}
 	defer resp.Body.Close()

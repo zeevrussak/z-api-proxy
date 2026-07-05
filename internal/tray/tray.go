@@ -61,7 +61,7 @@ func loadWorkerURL() string {
 }
 
 func saveWorkerURL(url string) {
-	if err := os.WriteFile(workerPrefPath(), []byte(url), 0644); err != nil {
+	if err := os.WriteFile(workerPrefPath(), []byte(url), 0600); err != nil {
 		log.Printf("worker pref: cannot persist: %v", err)
 	}
 }
@@ -101,7 +101,7 @@ func saveTunnelPref(on bool) {
 	if on {
 		val = "1"
 	}
-	if err := os.WriteFile(tunnelPrefPath(), []byte(val), 0644); err != nil {
+	if err := os.WriteFile(tunnelPrefPath(), []byte(val), 0600); err != nil {
 		log.Printf("tunnel pref: cannot persist: %v", err)
 	}
 }
@@ -412,7 +412,9 @@ func (t *trayApp) copyBaseURL(mCopyURL *systray.MenuItem) {
 	}
 
 	cmd := exec.Command("powershell", "-NoProfile", "-Command",
-		fmt.Sprintf("Set-Clipboard -Value '%s'", baseURL))
+		"$input | Set-Clipboard")
+	cmd.Stdin = strings.NewReader(baseURL)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	if err := cmd.Run(); err != nil {
 		log.Printf("clipboard error: %v", err)
 		messageBox("Failed to copy to clipboard:\n"+err.Error(), "Z-API Proxy", mbIconError)

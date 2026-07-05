@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os/exec"
 	"runtime"
+	"strings"
 	"sync"
 	"syscall"
 	"unsafe"
@@ -180,7 +181,8 @@ func setControlText(hwnd uintptr, text string) {
 
 func copyToClip(text string) {
 	cmd := exec.Command("powershell", "-NoProfile", "-Command",
-		fmt.Sprintf("Set-Clipboard -Value '%s'", text))
+		"$input | Set-Clipboard")
+	cmd.Stdin = strings.NewReader(text)
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	cmd.Run()
 }

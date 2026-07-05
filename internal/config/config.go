@@ -253,7 +253,7 @@ to = "glm-4.5-flash"
 [[models]]
 from = "z.ai/glm-4.5v"
 to = "glm-4.5v"`
-	return os.WriteFile(path, []byte(content), 0644)
+	return os.WriteFile(path, []byte(content), 0600)
 }
 
 // CreateDefaultSecrets writes a starter secrets.toml with commented-out
@@ -278,7 +278,7 @@ token = ""
 [cloudflare]
 api_token = ""
 `
-	return os.WriteFile(path, []byte(content), 0644)
+	return os.WriteFile(path, []byte(content), 0600)
 }
 
 // AppConfigDir returns the per-user configuration directory for the proxy,

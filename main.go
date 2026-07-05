@@ -40,7 +40,7 @@ var iconError []byte
 
 func main() {
 	logPath := filepath.Join(config.AppConfigDir(), "proxy.log")
-	logFile, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	logFile, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 	if err == nil {
 		log.SetOutput(logFile)
 	}

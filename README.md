@@ -178,9 +178,20 @@ https://z-api-proxy.your-subdomain.workers.dev/v1
 
 #### Step 4: Use in Cursor
 
-Set this URL as your **OpenAI API Base URL** in Cursor. The Worker handles requests 24/7 — no tunnel, no cloudflared, no local proxy required (though the local proxy must be running for the Worker to reach z.ai... actually the Worker talks to z.ai directly).
+Set this URL as your **OpenAI API Base URL** in Cursor. The Worker runs on Cloudflare's edge network and forwards directly to z.ai — no local proxy or tunnel needed.
 
-> **Security**: The Worker enforces `verify_key` if enabled in your config — only requests with your matching API key are accepted. Without it, anyone with your Worker URL could use it.
+> **Security**: Workers **always enforce API key verification** — every request must include your z.ai API key in the `Authorization: Bearer` header. This cannot be disabled. The Worker rejects requests with missing or mismatched keys (HTTP 401).
+
+#### Configuration files
+
+The proxy uses two configuration files for security:
+
+| File | Contents | Permissions |
+|------|----------|-------------|
+| `%APPDATA%\Z-API-Proxy\config.toml` | Server, upstream URL, tunnel mode, model mappings, Cloudflare account ID | `0600` |
+| `%APPDATA%\Z-API-Proxy\secrets.toml` | API keys, tunnel tokens, Cloudflare API tokens | `0600` |
+
+Secrets are always kept separate from the main config and written with restrictive permissions (`0600` — owner read/write only).
 
 #### Worker vs Tunnel comparison
 
@@ -189,6 +200,7 @@ Set this URL as your **OpenAI API Base URL** in Cursor. The Worker handles reque
 | URL stability | Permanent (never changes) | Ephemeral (Quick) or stable (Named) |
 | Requires cloudflared | No | Yes |
 | Requires local proxy running | No (edge → z.ai direct) | Yes (tunnel → local proxy) |
+| API key verification | Always enforced | Optional (`verify_key` setting) |
 | Setup effort | Medium (API token) | Low (Quick) / Medium (Named) |
 | Cost | Free tier: 100k requests/day | Free |
 

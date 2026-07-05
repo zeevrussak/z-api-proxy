@@ -178,7 +178,8 @@ func (m *Manager) startNamed() (string, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	cmd := exec.CommandContext(ctx, m.cloudflaredPath(),
-		"tunnel", "--no-autoupdate", "run", "--token", m.token)
+		"tunnel", "--no-autoupdate", "run")
+	cmd.Env = append(os.Environ(), "TUNNEL_TOKEN="+m.token)
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 
 	if err := cmd.Start(); err != nil {

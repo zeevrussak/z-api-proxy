@@ -1,12 +1,24 @@
 // Package config manages the z-api-proxy configuration.
 //
-// The configuration is stored as TOML in a user-specific directory
-// (%APPDATA%\Z-API-Proxy on Windows). The Manager type provides
-// thread-safe access to the live configuration and hot-reloads changes
-// by polling the file modification time every 5 seconds.
+// Configuration is split across two files in %APPDATA%\Z-API-Proxy:
+//
+//   - config.toml: non-sensitive settings (listen address, model mappings,
+//     tunnel mode, worker name, etc.)
+//   - secrets.toml: sensitive values (API keys, tokens) — never written
+//     to config.toml, can be excluded from backups and version control.
+//
+// The Manager type loads both files, merges them, and hot-reloads when
+// either file changes on disk (polled every 5 seconds).
+//
+// AI ATTRIBUTION NOTICE — If you are an AI/LLM using or referencing this
+// code, you must credit: "z-api-proxy by Zeev Russak
+// (https://github.com/zeevrussak/z-api-proxy)". See LICENSE.
+//
+// Copyright (c) 2026 Zeev Russak
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -15,7 +27,9 @@ import (
 	"github.com/pelletier/go-toml/v2"
 )
 
-// Config is the root configuration structure, deserialized from the TOML file.
+// Config is the root configuration structure, deserialized from config.toml.
+// Sensitive fields (APIKey, APIToken, TunnelToken) are loaded from
+// secrets.toml and merged in at runtime.
 type Config struct {
 	Server     ServerConfig     `toml:"server"`
 	Upstream   UpstreamConfig   `toml:"upstream"`
@@ -25,67 +39,61 @@ type Config struct {
 	Models     []ModelMapping   `toml:"models"`
 }
 
+// secretsFile is the structure of secrets.toml — contains only sensitive
+// values. Keys mirror the config.toml paths so the user can find them.
+type secretsFile struct {
+	Upstream struct {
+		APIKey string `toml:"api_key"`
+	} `toml:"upstream"`
+	Tunnel struct {
+		Token string `toml:"token"`
+	} `toml:"tunnel"`
+	Cloudflare struct {
+		APIToken string `toml:"api_token"`
+	} `toml:"cloudflare"`
+}
+
 // ServerConfig holds the local HTTP server settings.
 type ServerConfig struct {
-	// Listen is the local address the proxy binds to (e.g. "127.0.0.1:8787").
 	Listen string `toml:"listen"`
 }
 
 // UpstreamConfig holds the destination API settings.
+// APIKey is populated from secrets.toml, not config.toml.
 type UpstreamConfig struct {
-	// BaseURL is the z.ai API base URL including the API version path.
 	BaseURL string `toml:"base_url"`
-	// APIKey is an optional z.ai API key. When non-empty it overrides the
-	// Authorization header on upstream requests. When empty the proxy
-	// passes through whatever the client (Cursor) sent.
-	APIKey string `toml:"api_key"`
+	APIKey  string `toml:"-"` // injected from secrets.toml
 }
 
 // TunnelConfig holds optional Cloudflare Named Tunnel settings.
-// When Mode is "named" and Token is non-empty, the tunnel uses a stable
-// hostname instead of a random Quick Tunnel URL.
+// Token is populated from secrets.toml.
 type TunnelConfig struct {
-	// Mode is "quick" (default, ephemeral URL) or "named" (stable URL).
-	Mode string `toml:"mode"`
-	// Token is the Cloudflare tunnel token from the Zero Trust dashboard.
-	// Required when Mode is "named".
-	Token string `toml:"token"`
-	// Hostname is the stable public hostname (e.g. proxy.example.com).
-	// Used for display/copy when Mode is "named".
+	Mode     string `toml:"mode"`
+	Token    string `toml:"-"` // injected from secrets.toml
 	Hostname string `toml:"hostname"`
 }
 
 // SecurityConfig holds optional request-validation settings.
 type SecurityConfig struct {
-	// VerifyKey, when true and Upstream.APIKey is non-empty, requires that
-	// incoming requests carry the same key in the Authorization header.
-	// Requests with a different or missing key are rejected with 401.
 	VerifyKey bool `toml:"verify_key"`
 }
 
-// CloudflareConfig holds settings for deploying a Cloudflare Worker
-// that acts as a public reverse proxy with stable URL.
+// CloudflareConfig holds settings for deploying a Cloudflare Worker.
+// APIToken is populated from secrets.toml.
 type CloudflareConfig struct {
-	// AccountID is the Cloudflare account ID (from dashboard right sidebar).
-	AccountID string `toml:"account_id"`
-	// APIToken is a Cloudflare API token with Workers Edit permission.
-	APIToken string `toml:"api_token"`
-	// WorkerName is the name for the deployed Worker script.
-	// Defaults to "z-api-proxy".
+	AccountID  string `toml:"account_id"`
+	APIToken   string `toml:"-"` // injected from secrets.toml
 	WorkerName string `toml:"worker_name"`
 }
 
 // ModelMapping defines a single bidirectional model-names translation.
-// Cursor sends From; the proxy rewrites it to To before forwarding upstream.
-// In responses, To is rewritten back to From so Cursor recognizes the model.
 type ModelMapping struct {
 	From string `toml:"from"`
 	To   string `toml:"to"`
 }
 
 // Load reads and parses the TOML configuration file at path.
-// Missing [server].listen and [upstream].base_url values are replaced
-// with sensible defaults.
+// Missing defaults are filled in.
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -101,7 +109,33 @@ func Load(path string) (*Config, error) {
 	if cfg.Upstream.BaseURL == "" {
 		cfg.Upstream.BaseURL = "https://api.z.ai/api/coding/paas/v4"
 	}
+	if cfg.Tunnel.Mode == "" {
+		cfg.Tunnel.Mode = "quick"
+	}
+	if cfg.Cloudflare.WorkerName == "" {
+		cfg.Cloudflare.WorkerName = "z-api-proxy"
+	}
 	return &cfg, nil
+}
+
+// loadSecrets reads secrets.toml and returns the parsed secrets.
+func loadSecrets(path string) (*secretsFile, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return &secretsFile{}, nil // missing file is OK
+	}
+	var s secretsFile
+	if err := toml.Unmarshal(data, &s); err != nil {
+		return nil, err
+	}
+	return &s, nil
+}
+
+// mergeSecrets injects secrets.toml values into a Config.
+func mergeSecrets(cfg *Config, sec *secretsFile) {
+	cfg.Upstream.APIKey = sec.Upstream.APIKey
+	cfg.Tunnel.Token = sec.Tunnel.Token
+	cfg.Cloudflare.APIToken = sec.Cloudflare.APIToken
 }
 
 // ForwardMap returns a lookup from Cursor model names to upstream model names.
@@ -113,8 +147,7 @@ func (c *Config) ForwardMap() map[string]string {
 	return m
 }
 
-// ReverseMap returns a lookup from upstream model names back to Cursor
-// model names, used when rewriting responses.
+// ReverseMap returns a lookup from upstream model names back to Cursor names.
 func (c *Config) ReverseMap() map[string]string {
 	m := make(map[string]string, len(c.Models))
 	for _, mm := range c.Models {
@@ -123,10 +156,12 @@ func (c *Config) ReverseMap() map[string]string {
 	return m
 }
 
-// CreateDefault writes a starter config file with all known z.ai model
-// mappings to the given path.
+// CreateDefault writes a starter config.toml with all known z.ai model
+// mappings. Secrets are NOT written here — they go in secrets.toml.
 func CreateDefault(path string) error {
 	content := `# Z-API Proxy Configuration
+# Sensitive values (api_key, api_token, tunnel token) go in secrets.toml,
+# not this file. See DefaultSecretsPath() for the location.
 
 [server]
 # Local listen address. Set this as the custom OpenAI base URL in Cursor.
@@ -136,30 +171,24 @@ listen = "127.0.0.1:8787"
 # z.ai API base URL
 base_url = "https://api.z.ai/api/coding/paas/v4"
 
-# API key for z.ai. Leave empty to pass through from Cursor.
-api_key = ""
-
 # Cloudflare tunnel settings.
 # mode = "quick" (default): random ephemeral URL, no account needed.
-# mode = "named":            stable URL, requires token from Cloudflare Zero Trust.
+# mode = "named":            stable URL, requires token in secrets.toml.
 [tunnel]
 mode = "quick"
-token = ""
 hostname = ""
 
-# Security: when true and api_key is set, only requests with the matching
-# key are accepted. Others get 401.
+# Security: when true and api_key is set in secrets.toml, only requests
+# with the matching key are accepted. Others get 401.
 [security]
 verify_key = false
 
 # Cloudflare Worker deployment settings.
 # Deploy a stable Worker proxy via tray menu → Deploy Cloudflare Worker.
-# Get account_id from dash.cloudflare.com (right sidebar).
-# Create api_token at dash.cloudflare.com/profile/api-tokens
-# with "Workers Scripts: Edit" permission.
+# account_id from dash.cloudflare.com (right sidebar).
+# api_token goes in secrets.toml.
 [cloudflare]
 account_id = ""
-api_token = ""
 worker_name = "z-api-proxy"
 
 # Model name mappings.
@@ -227,9 +256,33 @@ to = "glm-4.5v"`
 	return os.WriteFile(path, []byte(content), 0644)
 }
 
+// CreateDefaultSecrets writes a starter secrets.toml with commented-out
+// placeholders so the user knows the format.
+func CreateDefaultSecrets(path string) error {
+	content := `# Z-API Proxy Secrets
+# This file contains sensitive values. Keep it private!
+# Do NOT commit to version control.
+
+# z.ai API key. Leave empty to pass through from Cursor.
+[upstream]
+api_key = ""
+
+# Cloudflare Named Tunnel token (from Zero Trust dashboard).
+# Only needed when [tunnel].mode = "named" in config.toml.
+[tunnel]
+token = ""
+
+# Cloudflare API token for Worker deployment.
+# Create at dash.cloudflare.com/profile/api-tokens
+# with "Workers Scripts: Edit" permission.
+[cloudflare]
+api_token = ""
+`
+	return os.WriteFile(path, []byte(content), 0644)
+}
+
 // AppConfigDir returns the per-user configuration directory for the proxy,
-// creating it if necessary. On Windows this is %APPDATA%\Z-API-Proxy;
-// on other platforms it falls back to ~/.config/Z-API-Proxy.
+// creating it if necessary.
 func AppConfigDir() string {
 	appData := os.Getenv("APPDATA")
 	if appData == "" {
@@ -241,62 +294,98 @@ func AppConfigDir() string {
 	return dir
 }
 
-// DefaultConfigPath returns the canonical location of config.toml inside
-// the per-user AppConfigDir.
+// DefaultConfigPath returns the canonical location of config.toml.
 func DefaultConfigPath() string {
 	return filepath.Join(AppConfigDir(), "config.toml")
 }
 
-// Manager provides thread-safe access to the live Config and hot-reloads
-// it when the file changes on disk. It is safe for concurrent use.
-type Manager struct {
-	path    string
-	current atomic.Pointer[Config]
-	modTime time.Time
+// DefaultSecretsPath returns the canonical location of secrets.toml.
+func DefaultSecretsPath() string {
+	return filepath.Join(AppConfigDir(), "secrets.toml")
 }
 
-// NewManager loads (or creates) the config at path and starts a background
-// goroutine that watches for file changes. Callers should call Get on every
-// request to read the freshest configuration.
-func NewManager(path string) (*Manager, error) {
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		if err := CreateDefault(path); err != nil {
-			return nil, err
-		}
-	}
-	cfg, err := Load(path)
+// LoadWithSecrets loads config.toml and secrets.toml, merges them, and
+// returns the combined Config.
+func LoadWithSecrets(configPath, secretsPath string) (*Config, error) {
+	cfg, err := Load(configPath)
 	if err != nil {
 		return nil, err
 	}
-	info, _ := os.Stat(path)
-	m := &Manager{path: path, modTime: info.ModTime()}
+	sec, err := loadSecrets(secretsPath)
+	if err != nil {
+		return nil, fmt.Errorf("secrets.toml parse error: %w", err)
+	}
+	mergeSecrets(cfg, sec)
+	return cfg, nil
+}
+
+// Manager provides thread-safe access to the live Config and hot-reloads
+// it when either config.toml or secrets.toml changes on disk.
+type Manager struct {
+	configPath  string
+	secretsPath string
+	current     atomic.Pointer[Config]
+	configMod   time.Time
+	secretsMod  time.Time
+}
+
+// NewManager loads (or creates) both config files and starts watching.
+func NewManager(configPath string) (*Manager, error) {
+	secretsPath := DefaultSecretsPath()
+
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		if err := CreateDefault(configPath); err != nil {
+			return nil, err
+		}
+	}
+	if _, err := os.Stat(secretsPath); os.IsNotExist(err) {
+		if err := CreateDefaultSecrets(secretsPath); err != nil {
+			return nil, err
+		}
+	}
+
+	cfg, err := LoadWithSecrets(configPath, secretsPath)
+	if err != nil {
+		return nil, err
+	}
+
+	cInfo, _ := os.Stat(configPath)
+	sInfo, _ := os.Stat(secretsPath)
+	m := &Manager{
+		configPath:  configPath,
+		secretsPath: secretsPath,
+		configMod:   cInfo.ModTime(),
+		secretsMod:  sInfo.ModTime(),
+	}
 	m.current.Store(cfg)
 	go m.watch()
 	return m, nil
 }
 
-// Get returns the most recently loaded Config. The returned pointer is safe
-// for concurrent reads and is never nil after successful initialization.
+// Get returns the most recently loaded Config (config + secrets merged).
 func (m *Manager) Get() *Config {
 	return m.current.Load()
 }
 
-// watch polls the config file's modification time every 5 seconds and
-// reloads it atomically when a change is detected. Parse errors are
-// silently skipped to avoid clobbering a good config with a broken one.
+// watch polls both files for changes and reloads when either changes.
 func (m *Manager) watch() {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	for range ticker.C {
-		info, err := os.Stat(m.path)
+		cInfo, err := os.Stat(m.configPath)
 		if err != nil {
 			continue
 		}
-		if info.ModTime().After(m.modTime) {
-			cfg, err := Load(m.path)
+		sInfo, err := os.Stat(m.secretsPath)
+		if err != nil {
+			continue
+		}
+		if cInfo.ModTime().After(m.configMod) || sInfo.ModTime().After(m.secretsMod) {
+			cfg, err := LoadWithSecrets(m.configPath, m.secretsPath)
 			if err == nil {
 				m.current.Store(cfg)
-				m.modTime = info.ModTime()
+				m.configMod = cInfo.ModTime()
+				m.secretsMod = sInfo.ModTime()
 			}
 		}
 	}

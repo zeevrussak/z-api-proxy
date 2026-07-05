@@ -1,37 +1,28 @@
 # Z-API Proxy Configuration
-# This file is auto-created in %APPDATA%\Z-API-Proxy\config.toml on first run.
-# Edit it via the tray menu → Configure...
+# Sensitive values (api_key, api_token, tunnel token) go in secrets.toml,
+# not this file.
 
 [server]
 # Local listen address. Set this as the custom OpenAI base URL in Cursor.
-# In Cursor: Settings → Models → OpenAI API Base URL = http://127.0.0.1:8787/v1
 listen = "127.0.0.1:8787"
 
 [upstream]
 # z.ai API base URL
-base_url = "https://api.z.ai/api/paas/v4"
-
-# API key for z.ai. Leave empty to pass through from Cursor.
-api_key = ""
+base_url = "https://api.z.ai/api/coding/paas/v4"
 
 # Cloudflare tunnel settings.
-# mode = "quick" (default): random ephemeral URL, no account needed.
-# mode = "named":            stable URL, requires token from Cloudflare Zero Trust.
 [tunnel]
 mode = "quick"
-token = ""
 hostname = ""
 
-# Security: when true and api_key is set, only requests with the matching
-# key are accepted. Others get 401.
+# Security: when true and api_key is set in secrets.toml, only matching keys
+# are accepted. Others get 401.
 [security]
 verify_key = false
 
 # Cloudflare Worker deployment settings.
-# Deploy a stable Worker proxy via tray menu → Deploy Cloudflare Worker.
 [cloudflare]
 account_id = ""
-api_token = ""
 worker_name = "z-api-proxy"
 
 # Model name mappings.

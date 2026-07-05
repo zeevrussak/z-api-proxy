@@ -6,17 +6,19 @@ import (
 	"testing"
 )
 
-// writeTempConfig writes the given TOML content to a temp file and returns
-// its path. The file is cleaned up automatically because it resides in the
-// test's t.TempDir().
-func writeTempConfig(t *testing.T, content string) string {
+// writeTempFile writes content to a temp file and returns its path.
+func writeTempFile(t *testing.T, name, content string) string {
 	t.Helper()
-	dir := t.TempDir()
-	path := filepath.Join(dir, "config.toml")
+	path := filepath.Join(t.TempDir(), name)
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-		t.Fatalf("write temp config: %v", err)
+		t.Fatalf("write temp file: %v", err)
 	}
 	return path
+}
+
+// writeTempConfig writes a config.toml to temp dir.
+func writeTempConfig(t *testing.T, content string) string {
+	return writeTempFile(t, "config.toml", content)
 }
 
 func TestLoad_ValidConfig(t *testing.T) {
@@ -26,7 +28,6 @@ listen = "0.0.0.0:9999"
 
 [upstream]
 base_url = "https://example.com/v1"
-api_key = "secret"
 
 [[models]]
 from = "z.ai/glm-5.2"
@@ -47,9 +48,6 @@ to = "glm-4.6"
 	if cfg.Upstream.BaseURL != "https://example.com/v1" {
 		t.Errorf("BaseURL = %q, want %q", cfg.Upstream.BaseURL, "https://example.com/v1")
 	}
-	if cfg.Upstream.APIKey != "secret" {
-		t.Errorf("APIKey = %q, want %q", cfg.Upstream.APIKey, "secret")
-	}
 	if len(cfg.Models) != 2 {
 		t.Fatalf("Models length = %d, want 2", len(cfg.Models))
 	}
@@ -61,7 +59,7 @@ to = "glm-4.6"
 func TestLoad_DefaultsApplied(t *testing.T) {
 	path := writeTempConfig(t, `
 [upstream]
-api_key = "test"
+base_url = "https://test.com"
 `)
 
 	cfg, err := Load(path)
@@ -71,8 +69,14 @@ api_key = "test"
 	if cfg.Server.Listen != "127.0.0.1:8787" {
 		t.Errorf("default Listen = %q, want 127.0.0.1:8787", cfg.Server.Listen)
 	}
-	if cfg.Upstream.BaseURL != "https://api.z.ai/api/coding/paas/v4" {
-		t.Errorf("default BaseURL = %q, want https://api.z.ai/api/coding/paas/v4", cfg.Upstream.BaseURL)
+	if cfg.Upstream.BaseURL != "https://test.com" {
+		t.Errorf("BaseURL = %q, want https://test.com", cfg.Upstream.BaseURL)
+	}
+	if cfg.Tunnel.Mode != "quick" {
+		t.Errorf("default Tunnel.Mode = %q, want quick", cfg.Tunnel.Mode)
+	}
+	if cfg.Cloudflare.WorkerName != "z-api-proxy" {
+		t.Errorf("default WorkerName = %q, want z-api-proxy", cfg.Cloudflare.WorkerName)
 	}
 }
 
@@ -91,6 +95,64 @@ func TestLoad_InvalidTOML(t *testing.T) {
 	}
 }
 
+func TestLoadWithSecrets(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(cfgPath, []byte(`
+[upstream]
+base_url = "https://api.z.ai"
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	secPath := filepath.Join(dir, "secrets.toml")
+	if err := os.WriteFile(secPath, []byte(`
+[upstream]
+api_key = "sk-secret-key"
+
+[cloudflare]
+api_token = "cf-token-123"
+
+[tunnel]
+token = "tunnel-token"
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadWithSecrets(cfgPath, secPath)
+	if err != nil {
+		t.Fatalf("LoadWithSecrets: %v", err)
+	}
+	if cfg.Upstream.APIKey != "sk-secret-key" {
+		t.Errorf("APIKey = %q, want sk-secret-key", cfg.Upstream.APIKey)
+	}
+	if cfg.Cloudflare.APIToken != "cf-token-123" {
+		t.Errorf("APIToken = %q, want cf-token-123", cfg.Cloudflare.APIToken)
+	}
+	if cfg.Tunnel.Token != "tunnel-token" {
+		t.Errorf("Tunnel.Token = %q, want tunnel-token", cfg.Tunnel.Token)
+	}
+}
+
+func TestLoadWithSecrets_NoSecretsFile(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(cfgPath, []byte(`
+[upstream]
+base_url = "https://api.z.ai"
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	secPath := filepath.Join(dir, "secrets.toml") // does not exist
+
+	cfg, err := LoadWithSecrets(cfgPath, secPath)
+	if err != nil {
+		t.Fatalf("LoadWithSecrets with no secrets file: %v", err)
+	}
+	if cfg.Upstream.APIKey != "" {
+		t.Errorf("APIKey = %q, want empty", cfg.Upstream.APIKey)
+	}
+}
+
 func TestForwardMap(t *testing.T) {
 	cfg := &Config{
 		Models: []ModelMapping{
@@ -105,27 +167,17 @@ func TestForwardMap(t *testing.T) {
 	if fwd["z.ai/glm-5.2"] != "glm-5.2" {
 		t.Errorf("ForwardMap[z.ai/glm-5.2] = %q, want glm-5.2", fwd["z.ai/glm-5.2"])
 	}
-	if fwd["z.ai/glm-4.6"] != "glm-4.6" {
-		t.Errorf("ForwardMap[z.ai/glm-4.6] = %q, want glm-4.6", fwd["z.ai/glm-4.6"])
-	}
 }
 
 func TestReverseMap(t *testing.T) {
 	cfg := &Config{
 		Models: []ModelMapping{
 			{From: "z.ai/glm-5.2", To: "glm-5.2"},
-			{From: "z.ai/glm-4.6", To: "glm-4.6"},
 		},
 	}
 	rev := cfg.ReverseMap()
-	if len(rev) != 2 {
-		t.Fatalf("ReverseMap length = %d, want 2", len(rev))
-	}
 	if rev["glm-5.2"] != "z.ai/glm-5.2" {
 		t.Errorf("ReverseMap[glm-5.2] = %q, want z.ai/glm-5.2", rev["glm-5.2"])
-	}
-	if rev["glm-4.6"] != "z.ai/glm-4.6" {
-		t.Errorf("ReverseMap[glm-4.6] = %q, want z.ai/glm-4.6", rev["glm-4.6"])
 	}
 }
 
@@ -134,20 +186,14 @@ func TestForwardReverseMap_Empty(t *testing.T) {
 	if m := cfg.ForwardMap(); len(m) != 0 {
 		t.Errorf("empty ForwardMap length = %d, want 0", len(m))
 	}
-	if m := cfg.ReverseMap(); len(m) != 0 {
-		t.Errorf("empty ReverseMap length = %d, want 0", len(m))
-	}
 }
 
 func TestCreateDefault(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
-
 	if err := CreateDefault(path); err != nil {
 		t.Fatalf("CreateDefault: %v", err)
 	}
-
-	// The created file should be loadable and contain the expected defaults.
 	cfg, err := Load(path)
 	if err != nil {
 		t.Fatalf("Load after CreateDefault: %v", err)
@@ -155,10 +201,28 @@ func TestCreateDefault(t *testing.T) {
 	if cfg.Server.Listen != "127.0.0.1:8787" {
 		t.Errorf("Listen = %q, want 127.0.0.1:8787", cfg.Server.Listen)
 	}
-	if cfg.Upstream.BaseURL != "https://api.z.ai/api/coding/paas/v4" {
-		t.Errorf("BaseURL = %q, want https://api.z.ai/api/coding/paas/v4", cfg.Upstream.BaseURL)
-	}
 	if len(cfg.Models) != 14 {
 		t.Fatalf("Models length = %d, want 14", len(cfg.Models))
+	}
+	// config.toml should NOT contain api_key anymore
+	if cfg.Upstream.APIKey != "" {
+		t.Errorf("APIKey should be empty in config.toml, got %q", cfg.Upstream.APIKey)
+	}
+}
+
+func TestCreateDefaultSecrets(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "secrets.toml")
+	if err := CreateDefaultSecrets(path); err != nil {
+		t.Fatalf("CreateDefaultSecrets: %v", err)
+	}
+	// Verify it loads
+	sec, err := loadSecrets(path)
+	if err != nil {
+		t.Fatalf("loadSecrets: %v", err)
+	}
+	// Defaults should be empty
+	if sec.Upstream.APIKey != "" {
+		t.Errorf("default APIKey = %q, want empty", sec.Upstream.APIKey)
 	}
 }

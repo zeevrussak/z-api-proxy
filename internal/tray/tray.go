@@ -174,7 +174,8 @@ func (t *trayApp) onReady() {
 
 	systray.AddSeparator()
 
-	mConfig := systray.AddMenuItem("Configure...", "Open config.toml in Notepad")
+	mConfig := systray.AddMenuItem("Settings...", "Open the settings form")
+	mConfigRaw := systray.AddMenuItem("Edit Config (Raw)", "Open config.toml in Notepad")
 	mTest := systray.AddMenuItem("Test Connection", "Test upstream reachability")
 	mCopyURL := systray.AddMenuItem("Copy Base URL", "Copy the proxy base URL for Cursor")
 	mTunnel := systray.AddMenuItem("Start Public Tunnel", "Expose proxy on a public URL for Cursor")
@@ -195,7 +196,7 @@ func (t *trayApp) onReady() {
 
 	go t.updateTooltip()
 	go t.updateIcon()
-	go t.handleMenu(mConfig, mTest, mCopyURL, mTunnel, mWorker, mRegister, mStartup, mUpdate, mContact, mExit)
+	go t.handleMenu(mConfig, mConfigRaw, mTest, mCopyURL, mTunnel, mWorker, mRegister, mStartup, mUpdate, mContact, mExit)
 	go t.checkForUpdates(mUpdate)
 
 	// Auto-start tunnel if previously enabled
@@ -237,10 +238,16 @@ func (t *trayApp) updateIcon() {
 	}
 }
 
-func (t *trayApp) handleMenu(mConfig, mTest, mCopyURL, mTunnel, mWorker, mRegister, mStartup, mUpdate, mContact, mExit *systray.MenuItem) {
+func (t *trayApp) handleMenu(mConfig, mConfigRaw, mTest, mCopyURL, mTunnel, mWorker, mRegister, mStartup, mUpdate, mContact, mExit *systray.MenuItem) {
 	for {
 		select {
 		case <-mConfig.ClickedCh:
+			go func() {
+				cfg := t.manager.Get()
+				showSettingsDialog(cfg, t.configPath)
+			}()
+
+		case <-mConfigRaw.ClickedCh:
 			if err := exec.Command("notepad.exe", t.configPath).Start(); err != nil {
 				log.Printf("failed to open notepad: %v", err)
 			}

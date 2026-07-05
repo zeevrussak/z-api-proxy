@@ -28,9 +28,20 @@ if not exist build\amd64 mkdir build\amd64
 if not exist build\arm64 mkdir build\arm64
 if not exist releases mkdir releases
 
+:: --- Generate Windows resource (icon) .syso file ---
+echo.
+echo [0/5] Generating Windows icon resource...
+where rsrc >nul 2>&1
+if %ERRORLEVEL% equ 0 (
+    rsrc -ico assets\icon.ico -o z-api-proxy.syso
+    echo       Done.
+) else (
+    echo       rsrc not found, using existing z-api-proxy.syso
+)
+
 :: --- Build Go binaries ---
 echo.
-echo [1/4] Building amd64 binary...
+echo [1/5] Building amd64 binary...
 set GOOS=windows
 set GOARCH=amd64
 go build -ldflags "-H windowsgui -X main.version=%VERSION%" -o build\amd64\z-api-proxy.exe .
@@ -40,7 +51,7 @@ if %ERRORLEVEL% neq 0 (
 )
 echo       Done.
 
-echo [2/4] Building arm64 binary...
+echo [2/5] Building arm64 binary...
 set GOARCH=arm64
 go build -ldflags "-H windowsgui -X main.version=%VERSION%" -o build\arm64\z-api-proxy.exe .
 if %ERRORLEVEL% neq 0 (
@@ -53,7 +64,7 @@ echo       Done.
 
 :: --- Build MSIs ---
 echo.
-echo [3/4] Building MSI installers...
+echo [3/5] Building MSI installers...
 set WIX_VARS=-d MsiVersion=%MSIVER% -d DisplayVersion=%VERSION%
 
 wix build installer.wxs -arch x64 %WIX_VARS% ^
@@ -78,7 +89,7 @@ echo       z-api-proxy-win-%VERSION%-arm64.msi
 
 :: --- Build NSIS installer ---
 echo.
-echo [4/4] Building NSIS installer...
+echo [4/5] Building NSIS installer...
 where makensis >nul 2>&1
 if %ERRORLEVEL% neq 0 (
     echo WARNING: makensis not found on PATH, skipping NSIS installer.

@@ -283,7 +283,7 @@ func (t *trayApp) handleMenu(mConfig, mConfigRaw, mTest, mCopyURL, mTunnel, mWor
 		case <-mConfig.ClickedCh:
 			go func() {
 				cfg := t.manager.Get()
-				showSettingsDialog(cfg, t.configPath)
+				showSettingsDialog(cfg, t.configPath, t.iconNormal)
 			}()
 
 		case <-mConfigRaw.ClickedCh:

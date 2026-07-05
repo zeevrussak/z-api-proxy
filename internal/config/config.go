@@ -17,10 +17,12 @@ import (
 
 // Config is the root configuration structure, deserialized from the TOML file.
 type Config struct {
-	Server   ServerConfig   `toml:"server"`
-	Upstream UpstreamConfig `toml:"upstream"`
-	Tunnel   TunnelConfig   `toml:"tunnel"`
-	Models   []ModelMapping `toml:"models"`
+	Server     ServerConfig     `toml:"server"`
+	Upstream   UpstreamConfig   `toml:"upstream"`
+	Tunnel     TunnelConfig     `toml:"tunnel"`
+	Security   SecurityConfig   `toml:"security"`
+	Cloudflare CloudflareConfig `toml:"cloudflare"`
+	Models     []ModelMapping   `toml:"models"`
 }
 
 // ServerConfig holds the local HTTP server settings.
@@ -51,6 +53,26 @@ type TunnelConfig struct {
 	// Hostname is the stable public hostname (e.g. proxy.example.com).
 	// Used for display/copy when Mode is "named".
 	Hostname string `toml:"hostname"`
+}
+
+// SecurityConfig holds optional request-validation settings.
+type SecurityConfig struct {
+	// VerifyKey, when true and Upstream.APIKey is non-empty, requires that
+	// incoming requests carry the same key in the Authorization header.
+	// Requests with a different or missing key are rejected with 401.
+	VerifyKey bool `toml:"verify_key"`
+}
+
+// CloudflareConfig holds settings for deploying a Cloudflare Worker
+// that acts as a public reverse proxy with stable URL.
+type CloudflareConfig struct {
+	// AccountID is the Cloudflare account ID (from dashboard right sidebar).
+	AccountID string `toml:"account_id"`
+	// APIToken is a Cloudflare API token with Workers Edit permission.
+	APIToken string `toml:"api_token"`
+	// WorkerName is the name for the deployed Worker script.
+	// Defaults to "z-api-proxy".
+	WorkerName string `toml:"worker_name"`
 }
 
 // ModelMapping defines a single bidirectional model-names translation.
@@ -124,6 +146,21 @@ api_key = ""
 mode = "quick"
 token = ""
 hostname = ""
+
+# Security: when true and api_key is set, only requests with the matching
+# key are accepted. Others get 401.
+[security]
+verify_key = false
+
+# Cloudflare Worker deployment settings.
+# Deploy a stable Worker proxy via tray menu → Deploy Cloudflare Worker.
+# Get account_id from dash.cloudflare.com (right sidebar).
+# Create api_token at dash.cloudflare.com/profile/api-tokens
+# with "Workers Scripts: Edit" permission.
+[cloudflare]
+account_id = ""
+api_token = ""
+worker_name = "z-api-proxy"
 
 # Model name mappings.
 # Cursor sends "from", proxy rewrites to "to" before forwarding upstream.

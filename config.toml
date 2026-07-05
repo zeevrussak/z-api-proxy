@@ -22,6 +22,18 @@ mode = "quick"
 token = ""
 hostname = ""
 
+# Security: when true and api_key is set, only requests with the matching
+# key are accepted. Others get 401.
+[security]
+verify_key = false
+
+# Cloudflare Worker deployment settings.
+# Deploy a stable Worker proxy via tray menu → Deploy Cloudflare Worker.
+[cloudflare]
+account_id = ""
+api_token = ""
+worker_name = "z-api-proxy"
+
 # Model name mappings.
 # "from" = model name as sent by Cursor
 # "to"   = model name as expected by z.ai upstream

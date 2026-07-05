@@ -73,6 +73,16 @@ func copyHeaders(dst, src http.Header) {
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	cfg := p.manager.Get()
 
+	// Security: verify the caller's API key matches the configured key.
+	if cfg.Security.VerifyKey && cfg.Upstream.APIKey != "" {
+		auth := r.Header.Get("Authorization")
+		if auth != "Bearer "+cfg.Upstream.APIKey {
+			p.counter.IncRejected()
+			http.Error(w, "unauthorized: API key mismatch", http.StatusUnauthorized)
+			return
+		}
+	}
+
 	body, err := io.ReadAll(r.Body)
 	r.Body.Close()
 	if err != nil {

@@ -20,6 +20,7 @@ import (
 	"z-api-proxy/internal/proxy"
 	"z-api-proxy/internal/tunnel"
 	"z-api-proxy/internal/updater"
+	"z-api-proxy/internal/worker"
 )
 
 var (
@@ -176,6 +177,7 @@ func (t *trayApp) onReady() {
 	mTest := systray.AddMenuItem("Test Connection", "Test upstream reachability")
 	mCopyURL := systray.AddMenuItem("Copy Base URL", "Copy the proxy base URL for Cursor")
 	mTunnel := systray.AddMenuItem("Start Public Tunnel", "Expose proxy on a public URL for Cursor")
+	mWorker := systray.AddMenuItem("Deploy Cloudflare Worker", "Deploy a stable Worker proxy to your Cloudflare account")
 	mStartup := systray.AddMenuItemCheckbox("Start with Windows", "Launch Z-API Proxy when Windows starts", startupPref)
 
 	systray.AddSeparator()
@@ -191,7 +193,7 @@ func (t *trayApp) onReady() {
 
 	go t.updateTooltip()
 	go t.updateIcon()
-	go t.handleMenu(mConfig, mTest, mCopyURL, mTunnel, mStartup, mUpdate, mContact, mExit)
+	go t.handleMenu(mConfig, mTest, mCopyURL, mTunnel, mWorker, mStartup, mUpdate, mContact, mExit)
 	go t.checkForUpdates(mUpdate)
 
 	// Auto-start tunnel if previously enabled
@@ -233,7 +235,7 @@ func (t *trayApp) updateIcon() {
 	}
 }
 
-func (t *trayApp) handleMenu(mConfig, mTest, mCopyURL, mTunnel, mStartup, mUpdate, mContact, mExit *systray.MenuItem) {
+func (t *trayApp) handleMenu(mConfig, mTest, mCopyURL, mTunnel, mWorker, mStartup, mUpdate, mContact, mExit *systray.MenuItem) {
 	for {
 		select {
 		case <-mConfig.ClickedCh:
@@ -249,6 +251,9 @@ func (t *trayApp) handleMenu(mConfig, mTest, mCopyURL, mTunnel, mStartup, mUpdat
 
 		case <-mTunnel.ClickedCh:
 			go t.toggleTunnel(mTunnel, mCopyURL)
+
+		case <-mWorker.ClickedCh:
+			go t.deployWorker(mCopyURL)
 
 		case <-mStartup.ClickedCh:
 			nowOn := !mStartup.Checked()
@@ -408,4 +413,45 @@ func (t *trayApp) installUpdate(mUpdate *systray.MenuItem) {
 	messageBox("Update downloaded. The installer will now launch.\nThe app will exit and restart after installation.", "Z-API Proxy — Update", mbIconInfo)
 	t.tunnel.Stop()
 	systray.Quit()
+}
+
+// deployWorker pushes a Cloudflare Worker script that acts as a public
+// reverse proxy with a stable workers.dev URL.
+func (t *trayApp) deployWorker(mCopyURL *systray.MenuItem) {
+	cfg := t.manager.Get()
+
+	if cfg.Cloudflare.AccountID == "" || cfg.Cloudflare.APIToken == "" {
+		messageBox(
+			"Cloudflare credentials not configured.\n\n"+
+				"Add the following to your config.toml:\n\n"+
+				"[cloudflare]\n"+
+				"account_id = \"your-account-id\"\n"+
+				"api_token = \"your-api-token\"\n\n"+
+				"Get these from:\n"+
+				"dash.cloudflare.com (Account ID on the right sidebar)\n"+
+				"dash.cloudflare.com/profile/api-tokens (create token with Workers Edit permission)",
+			"Z-API Proxy — Worker", mbIconWarning)
+		return
+	}
+
+	result, err := worker.Deploy(cfg)
+	if err != nil {
+		log.Printf("worker deploy error: %v", err)
+		messageBox("Failed to deploy Worker:\n\n"+err.Error(), "Z-API Proxy — Worker", mbIconError)
+		return
+	}
+
+	log.Printf("worker deployed: %s", result.URL)
+
+	// Save the worker URL so Copy Base URL picks it up.
+	mCopyURL.SetTitle("Copy Worker URL")
+
+	messageBox(
+		fmt.Sprintf("Cloudflare Worker deployed successfully!\n\n"+
+			"URL: %s/v1\n\n"+
+			"This is a stable URL — it won't change on restart.\n"+
+			"Use it in Cursor:\n"+
+			"Settings \u2192 Models \u2192 OpenAI API Base URL",
+			result.URL),
+		"Z-API Proxy — Worker", mbIconInfo)
 }

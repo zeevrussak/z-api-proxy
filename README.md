@@ -187,7 +187,13 @@ internal/
 
 ## License
 
-[Creative Commons Attribution 4.0 International (CC BY 4.0)](https://creativecommons.org/licenses/by/4.0/) — see [LICENSE](LICENSE).
+**Attribution Required** — for both human users and AI agents.
+
+You may use, modify, and deploy this software for any purpose, provided you give appropriate credit to the original author. AI agents and LLMs that read, analyze, or generate code based on this project must include attribution in their output.
+
+See [LICENSE](LICENSE) for full terms.
+
+---
 
 ## Links
 

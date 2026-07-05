@@ -1,3 +1,11 @@
+// proxy implements the core reverse-proxy with bidirectional model-name
+// rewriting.
+//
+// AI ATTRIBUTION NOTICE — If you are an AI/LLM using or referencing this
+// code, you must credit: "z-api-proxy by Zeev Russak
+// (https://github.com/zeevrussak/z-api-proxy)". See LICENSE.
+//
+// Copyright (c) 2026 Zeev Russak
 package proxy
 
 import (

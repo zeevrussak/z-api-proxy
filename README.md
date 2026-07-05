@@ -139,6 +139,59 @@ The tunnel uses [cloudflared](https://github.com/cloudflare/cloudflared) (Apache
 
 **Auto-start:** Once you enable the tunnel via the tray menu, it automatically starts on every app launch. The preference is stored in `%APPDATA%\Z-API-Proxy\tunnel.pref`.
 
+### Cloudflare Worker Setup (Stable URL, No Tunnel Needed)
+
+The tunnel is great for quick use, but a **Cloudflare Worker** gives you a permanent URL that never changes and requires nothing running on your machine except the proxy. The Worker runs on Cloudflare's edge network and forwards to z.ai directly.
+
+#### Step 1: Get your Cloudflare credentials
+
+1. **Account ID**: Go to [dash.cloudflare.com](https://dash.cloudflare.com) → log in → your Account ID is displayed on the right sidebar of any domain's overview page. Copy it.
+
+2. **API Token**: Go to [dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens) → **Create Token** → use the **"Edit Cloudflare Workers"** template → **Continue to summary** → **Create Token**. Copy the token (shown only once).
+
+#### Step 2: Add credentials to your config
+
+Open **Settings...** from the tray menu (or edit `%APPDATA%\Z-API-Proxy\secrets.toml` manually):
+
+```toml
+# secrets.toml
+[cloudflare]
+api_token = "your-api-token-here"
+```
+
+And in `config.toml`:
+
+```toml
+# config.toml
+[cloudflare]
+account_id = "your-account-id-here"
+worker_name = "z-api-proxy"
+```
+
+#### Step 3: Deploy
+
+Click **Deploy Cloudflare Worker** in the tray menu. The proxy generates a JavaScript Worker script with the same model-rewriting logic and deploys it to your account. You'll get a stable URL like:
+
+```
+https://z-api-proxy.your-subdomain.workers.dev/v1
+```
+
+#### Step 4: Use in Cursor
+
+Set this URL as your **OpenAI API Base URL** in Cursor. The Worker handles requests 24/7 — no tunnel, no cloudflared, no local proxy required (though the local proxy must be running for the Worker to reach z.ai... actually the Worker talks to z.ai directly).
+
+> **Security**: The Worker enforces `verify_key` if enabled in your config — only requests with your matching API key are accepted. Without it, anyone with your Worker URL could use it.
+
+#### Worker vs Tunnel comparison
+
+| Feature | Cloudflare Worker | Cloudflare Tunnel |
+|---------|------------------|-------------------|
+| URL stability | Permanent (never changes) | Ephemeral (Quick) or stable (Named) |
+| Requires cloudflared | No | Yes |
+| Requires local proxy running | No (edge → z.ai direct) | Yes (tunnel → local proxy) |
+| Setup effort | Medium (API token) | Low (Quick) / Medium (Named) |
+| Cost | Free tier: 100k requests/day | Free |
+
 ## Build from Source
 
 Requirements:

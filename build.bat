@@ -30,10 +30,10 @@ if not exist releases mkdir releases
 
 :: --- Generate Windows resource (icon) .syso file ---
 echo.
-echo [0/5] Generating Windows icon resource...
+echo [0/5] Generating Windows icon + manifest resource...
 where rsrc >nul 2>&1
 if %ERRORLEVEL% equ 0 (
-    rsrc -ico assets\icon.ico -o z-api-proxy.syso
+    rsrc -manifest app.manifest -ico assets\icon.ico -o z-api-proxy.syso
     echo       Done.
 ) else (
     echo       rsrc not found, using existing z-api-proxy.syso

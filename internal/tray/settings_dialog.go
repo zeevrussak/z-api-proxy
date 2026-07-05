@@ -29,28 +29,36 @@ var (
 
 // Additional style and message constants.
 const (
-	esAutohscroll  = 0x0080
-	esPassword     = 0x0020
-	lbsNotify      = 0x0001
-	lbAddString    = 0x0180
-	lbDeleteString = 0x0182
-	lbGetCount     = 0x018B
-	lbGetCurSel    = 0x0188
-	bmGetCheck     = 0x00F0
-	bstChecked     = 1
-	wsVscroll      = 0x00200000
-	wsBorder       = 0x00800000
-	wsThickframe   = 0x00040000
-	wsMinimizeBox  = 0x00020000
-	wsMaximizeBox  = 0x00010000
+	esAutohscroll    = 0x0080
+	esPassword       = 0x0020
+	lbsNotify        = 0x0001
+	lbAddString      = 0x0180
+	lbDeleteString   = 0x0182
+	lbGetCount       = 0x018B
+	lbGetCurSel      = 0x0188
+	bmGetCheck       = 0x00F0
+	bstChecked       = 1
+	wsVscroll        = 0x00200000
+	wsBorder         = 0x00800000
+	wsThickframe     = 0x00040000
+	wsMinimizeBox    = 0x00020000
+	wsMaximizeBox    = 0x00010000
 
-	gwlStyle        = ^uintptr(15) + 1 // -16 as uintptr
-	bsAutocheckbox  = 0x00000003
+	gwlStyle          = ^uintptr(15) + 1 // -16 as uintptr
+	bsAutocheckbox    = 0x00000003
 	bsAutoradioButton = 0x00000004
 
-	wmSize  = 0x0005
-	wmSetIcon = 0x0080
+	wmSize      = 0x0005
+	wmSetIcon   = 0x0080
+	wmMouseWheel = 0x020A
+	wsGroup       = 0x00020000 // WS_GROUP for radio button grouping
+	wmVscroll    = 0x0115
 	sizeRestored = 0
+
+	sbLineUp   = 0
+	sbLineDown = 1
+	sbVert     = 1
+	wheelDelta = 120
 
 	// LoadImage constants
 	lrDefaultSize = 0x0040
@@ -114,6 +122,8 @@ type settingsDialogState struct {
 	hwndShowKey    uintptr
 	models         []config.ModelMapping
 	layout         []layoutControl
+	scrollPos      int32
+	contentHeight  int32
 }
 
 var (
@@ -212,8 +222,33 @@ func settingsWindowProc(hwnd, msg, wParam, lParam uintptr) uintptr {
 		if settingsState != nil {
 			relayoutControls()
 		}
-		// Force repaint
 		pInvalidateRect.Call(hwnd, 0, 1)
+
+	case wmMouseWheel:
+		if settingsState != nil {
+			wheel := int32(int16(wParam >> 16))
+			scrollDelta := -wheel * 2 // lines to scroll
+			newPos := settingsState.scrollPos + scrollDelta
+			clientRect := struct{ Left, Top, Right, Bottom int32 }{}
+			pGetClientRect.Call(hwnd, uintptr(unsafe.Pointer(&clientRect)))
+			clientH := clientRect.Bottom - clientRect.Top
+			maxScroll := settingsState.contentHeight - clientH
+			if maxScroll < 0 {
+				maxScroll = 0
+			}
+			if newPos < 0 {
+				newPos = 0
+			}
+			if newPos > maxScroll {
+				newPos = maxScroll
+			}
+			if newPos != settingsState.scrollPos {
+				oldPos := settingsState.scrollPos
+				settingsState.scrollPos = newPos
+				scrollAllChildren(int32(oldPos - newPos))
+				pUpdateScrollbar(hwnd)
+			}
+		}
 
 	case wmDestroy:
 		pPostQuitMessage.Call(0)
@@ -473,7 +508,7 @@ func showSettingsDialog(cfg *config.Config, configPath string, iconBytes []byte)
 
 	sw, _, _ := pGetSystemMetrics.Call(0)
 	sh, _, _ := pGetSystemMetrics.Call(1)
-	winW, winH := 540, 700
+	winW, winH := 560, 760
 	x := int32((int(sw) - winW) / 2)
 	y := int32((int(sh) - winH) / 2)
 
@@ -542,7 +577,7 @@ func showSettingsDialog(cfg *config.Config, configPath string, iconBytes []byte)
 		label, _ := syscall.UTF16PtrFromString(title)
 		sh2, _, _ := pCreateWindowExW.Call(
 			0, uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr("Static"))), uintptr(unsafe.Pointer(label)),
-			uintptr(wsChild|wsVisible|ssSimple),
+			uintptr(wsChild|wsVisible),
 			uintptr(mx), uintptr(*y), uintptr(fw+lw), uintptr(ch),
 			hwnd, 0, 0, 0,
 		)
@@ -589,11 +624,8 @@ func showSettingsDialog(cfg *config.Config, configPath string, iconBytes []byte)
 	// ── Security section ──
 	yPos += gap
 	createSection("Security", &yPos)
-	verifyLabel, _ := syscall.UTF16PtrFromString("Verify API Key (reject requests with non-matching key)")
-	verifyStyle := wsChild | wsVisible | bsAutocheckbox
-	if cfg.Security.VerifyKey {
-		verifyStyle |= bstChecked
-	}
+	verifyLabel, _ := syscall.UTF16PtrFromString("Verify API Key — always enabled (required for security)")
+	verifyStyle := wsChild | wsVisible | bsAutocheckbox | bstChecked | wsDisabled
 	hwndVerify, _, _ := pCreateWindowExW.Call(
 		0, uintptr(unsafe.Pointer(btnClass)), uintptr(unsafe.Pointer(verifyLabel)),
 		uintptr(verifyStyle),
@@ -608,7 +640,7 @@ func showSettingsDialog(cfg *config.Config, configPath string, iconBytes []byte)
 	createSection("Tunnel", &yPos)
 	isNamed := cfg.Tunnel.Mode == "named"
 	quickLabel, _ := syscall.UTF16PtrFromString("Quick (ephemeral URL)")
-	quickStyle := wsChild | wsVisible | bsAutoradioButton
+	quickStyle := wsChild | wsVisible | bsAutoradioButton | wsGroup
 	if !isNamed {
 		quickStyle |= bstChecked
 	}
@@ -634,7 +666,7 @@ func showSettingsDialog(cfg *config.Config, configPath string, iconBytes []byte)
 	pSendMessageW.Call(hwndNamed, wmSetFont, fontHandle, 1)
 	yPos += ch + gap
 	createLabel("Token:", mx, yPos, lw, ch)
-	hwndToken := createEdit(idTokenEd, cfg.Tunnel.Token, mx+lw+gap, yPos, fw, ch, false)
+	hwndToken := createEdit(idTokenEd, cfg.Tunnel.Token, mx+lw+gap, yPos, fw, ch, true)
 	addLayout(hwndToken, lfStretch)
 	yPos += ch + gap
 	createLabel("Hostname:", mx, yPos, lw, ch)
@@ -732,7 +764,13 @@ func showSettingsDialog(cfg *config.Config, configPath string, iconBytes []byte)
 	settingsState.hwndShowKey = hwndShowKey
 	settingsState.models = modelsCopy
 
+	// Record total content height for scrollbar calculations.
+	settingsState.contentHeight = int32(yPos) + int32(gap) + 30 + int32(gap)
+
 	refreshModelsList(hwndModels)
+
+	// Apply system dark/light theme to all controls.
+	applyTheme(hwnd, isSystemDarkMode())
 
 	pShowWindow.Call(hwnd, swShow)
 
@@ -746,16 +784,68 @@ func showSettingsDialog(cfg *config.Config, configPath string, iconBytes []byte)
 	}
 }
 
-// Additional Win32 procs for resize handling.
-var (
-	pGetClientRect   = user32.NewProc("GetClientRect")
-	pGetWindowRect   = user32.NewProc("GetWindowRect")
-	pScreenToClient  = user32.NewProc("ScreenToClient")
-)
+// scrollAllChildren shifts all child windows by dy pixels vertically.
+func scrollAllChildren(dy int32) {
+	if settingsState == nil {
+		return
+	}
+	s := settingsState
+	allHwnds := []uintptr{
+		s.hwndListen, s.hwndBaseURL, s.hwndAPIKey, s.hwndVerify,
+		s.hwndQuick, s.hwndNamed, s.hwndToken, s.hwndHostname,
+		s.hwndAcctID, s.hwndAPIToken, s.hwndWorkerName, s.hwndModels,
+		s.hwndSave, s.hwndCancel, s.hwndShowKey,
+	}
+	for _, hwnd := range s.layout {
+		allHwnds = append(allHwnds, hwnd.hwnd)
+	}
+	for _, hwnd := range allHwnds {
+		if hwnd == 0 {
+			continue
+		}
+		r := struct{ Left, Top, Right, Bottom int32 }{}
+		pGetWindowRect.Call(hwnd, uintptr(unsafe.Pointer(&r)))
+		pt := struct{ X, Y int32 }{r.Left, r.Top}
+		pScreenToClient.Call(s.hwnd, uintptr(unsafe.Pointer(&pt)))
+		curH := r.Bottom - r.Top
+		curW := r.Right - r.Left
+		newY := pt.Y + dy
+		pMoveWindow.Call(hwnd, uintptr(pt.X), uintptr(newY), uintptr(curW), uintptr(curH), 1)
+	}
+}
 
-// Additional constants.
-const (
-	ssSimple = 0x0000000B
+// pUpdateScrollbar updates the scrollbar info for the window.
+func pUpdateScrollbar(hwnd uintptr) {
+	if settingsState == nil {
+		return
+	}
+	si := struct {
+		Size       uint32
+		Mask       uint32
+		Min        int32
+		Max        int32
+		Page       uint32
+		Pos        int32
+		TrackPos   int32
+	}{}
+	si.Size = uint32(unsafe.Sizeof(si))
+	si.Mask = 0x4 | 0x1 | 0x2 | 0x10 // SIF_RANGE | SIF_POS | SIF_PAGE | SIF_DISABLENOSCROLL
+	si.Min = 0
+	si.Max = settingsState.contentHeight
+	clientRect := struct{ Left, Top, Right, Bottom int32 }{}
+	pGetClientRect.Call(hwnd, uintptr(unsafe.Pointer(&clientRect)))
+	si.Page = uint32(clientRect.Bottom - clientRect.Top)
+	si.Pos = settingsState.scrollPos
+
+	pSetScrollInfo.Call(hwnd, sbVert, uintptr(unsafe.Pointer(&si)), 1)
+}
+
+// Additional Win32 procs for scroll.
+var (
+	pGetClientRect  = user32.NewProc("GetClientRect")
+	pGetWindowRect  = user32.NewProc("GetWindowRect")
+	pScreenToClient = user32.NewProc("ScreenToClient")
+	pSetScrollInfo  = user32.NewProc("SetScrollInfo")
 )
 
 // keep imports alive

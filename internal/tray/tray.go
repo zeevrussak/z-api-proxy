@@ -17,6 +17,7 @@ import (
 
 	"z-api-proxy/internal/config"
 	"z-api-proxy/internal/counter"
+	cursorint "z-api-proxy/internal/cursor"
 	"z-api-proxy/internal/proxy"
 	"z-api-proxy/internal/tunnel"
 	"z-api-proxy/internal/updater"
@@ -178,6 +179,7 @@ func (t *trayApp) onReady() {
 	mCopyURL := systray.AddMenuItem("Copy Base URL", "Copy the proxy base URL for Cursor")
 	mTunnel := systray.AddMenuItem("Start Public Tunnel", "Expose proxy on a public URL for Cursor")
 	mWorker := systray.AddMenuItem("Deploy Cloudflare Worker", "Deploy a stable Worker proxy to your Cloudflare account")
+	mRegister := systray.AddMenuItem("Register Models in Cursor", "Add all z.ai models to Cursor and config.toml")
 	mStartup := systray.AddMenuItemCheckbox("Start with Windows", "Launch Z-API Proxy when Windows starts", startupPref)
 
 	systray.AddSeparator()
@@ -193,7 +195,7 @@ func (t *trayApp) onReady() {
 
 	go t.updateTooltip()
 	go t.updateIcon()
-	go t.handleMenu(mConfig, mTest, mCopyURL, mTunnel, mWorker, mStartup, mUpdate, mContact, mExit)
+	go t.handleMenu(mConfig, mTest, mCopyURL, mTunnel, mWorker, mRegister, mStartup, mUpdate, mContact, mExit)
 	go t.checkForUpdates(mUpdate)
 
 	// Auto-start tunnel if previously enabled
@@ -235,7 +237,7 @@ func (t *trayApp) updateIcon() {
 	}
 }
 
-func (t *trayApp) handleMenu(mConfig, mTest, mCopyURL, mTunnel, mWorker, mStartup, mUpdate, mContact, mExit *systray.MenuItem) {
+func (t *trayApp) handleMenu(mConfig, mTest, mCopyURL, mTunnel, mWorker, mRegister, mStartup, mUpdate, mContact, mExit *systray.MenuItem) {
 	for {
 		select {
 		case <-mConfig.ClickedCh:
@@ -254,6 +256,9 @@ func (t *trayApp) handleMenu(mConfig, mTest, mCopyURL, mTunnel, mWorker, mStartu
 
 		case <-mWorker.ClickedCh:
 			go t.deployWorker(mCopyURL)
+
+		case <-mRegister.ClickedCh:
+			go t.registerModels()
 
 		case <-mStartup.ClickedCh:
 			nowOn := !mStartup.Checked()
@@ -454,4 +459,52 @@ func (t *trayApp) deployWorker(mCopyURL *systray.MenuItem) {
 			"Settings \u2192 Models \u2192 OpenAI API Base URL",
 			result.URL),
 		"Z-API Proxy — Worker", mbIconInfo)
+}
+
+// registerModels adds all configured z.ai model names into Cursor's
+// settings.json and ensures they exist in the proxy config.
+func (t *trayApp) registerModels() {
+	cfg := t.manager.Get()
+
+	if !cursorint.IsInstalled() {
+		messageBox(
+			"Cursor is not installed.\n\n"+
+				"Expected at: %APPDATA%\\Cursor\\User\\settings.json\n\n"+
+				"Install Cursor from cursor.com and try again.",
+			"Z-API Proxy — Register", mbIconWarning)
+		return
+	}
+
+	proxyURL := fmt.Sprintf("http://%s/v1", cfg.Server.Listen)
+	if tunnelURL := t.tunnel.URL(); tunnelURL != "" {
+		proxyURL = tunnelURL + "/v1"
+	}
+
+	var modelNames []string
+	for _, m := range cfg.Models {
+		modelNames = append(modelNames, m.From)
+	}
+
+	settingsPath, err := cursorint.RegisterModels(proxyURL, modelNames)
+	if err != nil {
+		log.Printf("register models error: %v", err)
+		messageBox("Failed to register models in Cursor:\n\n"+err.Error(),
+			"Z-API Proxy — Register", mbIconError)
+		return
+	}
+
+	log.Printf("models registered in Cursor: %s (%d models)", settingsPath, len(modelNames))
+
+	messageBox(
+		fmt.Sprintf("Models registered in Cursor!\n\n"+
+			"Settings file: %s\n\n"+
+			"Base URL: %s\n"+
+			"Models: %d z.ai GLM models added\n\n"+
+			"Next steps:\n"+
+			"1. Restart Cursor\n"+
+			"2. Go to Settings \u2192 Models\n"+
+			"3. Enter your z.ai API key\n"+
+			"4. Select a z.ai model (e.g. z.ai/glm-5.2)",
+			settingsPath, proxyURL, len(modelNames)),
+		"Z-API Proxy — Register", mbIconInfo)
 }

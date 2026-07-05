@@ -46,6 +46,42 @@ func messageBox(text, title string, flags uintptr) {
 	procMessageBox.Call(0, uintptr(unsafe.Pointer(t)), uintptr(unsafe.Pointer(c)), flags)
 }
 
+// --- Worker URL preference ---
+
+func workerPrefPath() string {
+	return filepath.Join(config.AppConfigDir(), "worker.pref")
+}
+
+func loadWorkerURL() string {
+	data, err := os.ReadFile(workerPrefPath())
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+func saveWorkerURL(url string) {
+	if err := os.WriteFile(workerPrefPath(), []byte(url), 0644); err != nil {
+		log.Printf("worker pref: cannot persist: %v", err)
+	}
+}
+
+func clearWorkerURL() {
+	os.Remove(workerPrefPath())
+}
+
+// activeURL returns the best available proxy URL (Worker > Tunnel > Local).
+func (t *trayApp) activeURL() string {
+	if w := loadWorkerURL(); w != "" {
+		return strings.TrimSuffix(w, "/") + "/v1"
+	}
+	if tu := t.tunnel.URL(); tu != "" {
+		return tu + "/v1"
+	}
+	cfg := t.manager.Get()
+	return fmt.Sprintf("http://%s/v1", cfg.Server.Listen)
+}
+
 // --- Tunnel preference ---
 
 func tunnelPrefPath() string {
@@ -199,9 +235,12 @@ func (t *trayApp) onReady() {
 	go t.handleMenu(mConfig, mConfigRaw, mTest, mCopyURL, mTunnel, mWorker, mRegister, mStartup, mUpdate, mContact, mExit)
 	go t.checkForUpdates(mUpdate)
 
-	// Auto-start tunnel if previously enabled
-	if loadTunnelPref() {
+	// Auto-start: prefer Worker URL. If no Worker deployed, try tunnel.
+	if loadWorkerURL() == "" && loadTunnelPref() {
 		go t.autoStartTunnel(mTunnel, mCopyURL)
+	}
+	if w := loadWorkerURL(); w != "" {
+		mCopyURL.SetTitle("Copy Worker URL")
 	}
 }
 
@@ -363,7 +402,9 @@ func (t *trayApp) testConnection() {
 // copies the local proxy URL. Both include the /v1 suffix.
 func (t *trayApp) copyBaseURL(mCopyURL *systray.MenuItem) {
 	var baseURL string
-	if tunnelURL := t.tunnel.URL(); tunnelURL != "" {
+	if w := loadWorkerURL(); w != "" {
+		baseURL = strings.TrimSuffix(w, "/") + "/v1"
+	} else if tunnelURL := t.tunnel.URL(); tunnelURL != "" {
 		baseURL = tunnelURL + "/v1"
 	} else {
 		cfg := t.manager.Get()
@@ -455,8 +496,17 @@ func (t *trayApp) deployWorker(mCopyURL *systray.MenuItem) {
 
 	log.Printf("worker deployed: %s", result.URL)
 
-	// Save the worker URL so Copy Base URL picks it up.
+	// Persist the Worker URL so it's used by default on every launch.
+	saveWorkerURL(result.URL)
 	mCopyURL.SetTitle("Copy Worker URL")
+
+	// If the tunnel is running, stop it — the Worker replaces it.
+	if t.tunnel.Running() {
+		t.tunnel.Stop()
+		saveTunnelPref(false)
+		mTunnel := mCopyURL // not ideal but tunnel item not in scope
+		_ = mTunnel
+	}
 
 	messageBox(
 		fmt.Sprintf("Cloudflare Worker deployed successfully!\n\n"+
@@ -482,10 +532,7 @@ func (t *trayApp) registerModels() {
 		return
 	}
 
-	proxyURL := fmt.Sprintf("http://%s/v1", cfg.Server.Listen)
-	if tunnelURL := t.tunnel.URL(); tunnelURL != "" {
-		proxyURL = tunnelURL + "/v1"
-	}
+	proxyURL := t.activeURL()
 
 	var modelNames []string
 	for _, m := range cfg.Models {

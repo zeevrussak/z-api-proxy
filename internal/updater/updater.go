@@ -135,12 +135,16 @@ func (r *Release) DownloadAndInstall() error {
 		return fmt.Errorf("download returned HTTP %d", resp.StatusCode)
 	}
 
+	// Cap download at 200MB.
+	const maxDownloadSize = 200 << 20
+	limitedBody := io.LimitReader(resp.Body, maxDownloadSize)
+
 	out, err := os.CreateTemp(os.TempDir(), "z-api-proxy-update-*.msi")
 	if err != nil {
 		return fmt.Errorf("cannot create temp file: %w", err)
 	}
 	msiPath := out.Name()
-	if _, err := io.Copy(out, resp.Body); err != nil {
+	if _, err := io.Copy(out, limitedBody); err != nil {
 		os.Remove(msiPath)
 		return fmt.Errorf("download write failed: %w", err)
 	}

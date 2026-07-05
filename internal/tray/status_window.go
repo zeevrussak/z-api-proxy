@@ -102,6 +102,7 @@ type tunnelWindowState struct {
 
 var (
 	tunnelWinState *tunnelWindowState
+	stateMu        sync.Mutex // protects tunnelWinState
 	classAtom      uint16
 	classRegOnce   sync.Once
 	fontHandle     uintptr
@@ -152,6 +153,7 @@ func tunnelWindowProc(hwnd, msg, wParam, lParam uintptr) uintptr {
 		}
 
 	case wmUrlReady:
+		stateMu.Lock()
 		if tunnelWinState != nil {
 			tunnelWinState.ready = true
 			text := fmt.Sprintf("Public tunnel is live!\r\n\r\n%s/v1\r\n\r\nPaste this in Cursor:\r\nSettings \u2192 Models \u2192 OpenAI API Base URL",
@@ -160,11 +162,14 @@ func tunnelWindowProc(hwnd, msg, wParam, lParam uintptr) uintptr {
 			tunnelWinState.clipboard = tunnelWinState.url + "/v1"
 			pEnableWindow.Call(tunnelWinState.hwndCopy, 1)
 		}
+		stateMu.Unlock()
 
 	case wmUrlFailed:
+		stateMu.Lock()
 		if tunnelWinState != nil {
 			setControlText(tunnelWinState.hwndText, "Failed to start tunnel:\r\n\r\n"+tunnelWinState.errMsg)
 		}
+		stateMu.Unlock()
 
 	case wmDestroy:
 		pPostQuitMessage.Call(0)
@@ -275,15 +280,19 @@ func showTunnelWindow(tunnelMgr *tunnel.Manager) (string, bool) {
 	go func() {
 		url, err := tunnelMgr.Start()
 		if err != nil {
+			stateMu.Lock()
 			if tunnelWinState != nil {
 				tunnelWinState.errMsg = err.Error()
 			}
+			stateMu.Unlock()
 			pPostMessageW.Call(hwnd, wmUrlFailed, 0, 0)
 			return
 		}
+		stateMu.Lock()
 		if tunnelWinState != nil {
 			tunnelWinState.url = url
 		}
+		stateMu.Unlock()
 		pPostMessageW.Call(hwnd, wmUrlReady, 0, 0)
 	}()
 

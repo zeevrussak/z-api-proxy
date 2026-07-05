@@ -118,6 +118,11 @@ func (m *Manager) ensureDownloaded() error {
 		return fmt.Errorf("download returned HTTP %d", resp.StatusCode)
 	}
 
+	// Cap download at 200MB to prevent memory exhaustion from a
+	// compromised or misconfigured CDN response.
+	const maxDownloadSize = 200 << 20 // 200 MB
+	limitedBody := io.LimitReader(resp.Body, maxDownloadSize)
+
 	exePath := m.cloudflaredPath()
 	out, err := os.Create(exePath)
 	if err != nil {
@@ -125,7 +130,7 @@ func (m *Manager) ensureDownloaded() error {
 	}
 	defer out.Close()
 
-	if _, err := io.Copy(out, resp.Body); err != nil {
+	if _, err := io.Copy(out, limitedBody); err != nil {
 		os.Remove(exePath)
 		return fmt.Errorf("download write failed: %w", err)
 	}

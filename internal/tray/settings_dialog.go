@@ -25,6 +25,8 @@ var (
 	pLoadImageW           = user32.NewProc("LoadImageW")
 	pMoveWindow           = user32.NewProc("MoveWindow")
 	pInvalidateRect       = user32.NewProc("InvalidateRect")
+	pTranslateMessage     = user32.NewProc("TranslateMessage")
+	pIsDialogMessageW     = user32.NewProc("IsDialogMessageW")
 )
 
 // Additional style and message constants.
@@ -46,7 +48,7 @@ const (
 	wsMaximizeBox    = 0x00010000
 	wsTabstop        = 0x00010000
 
-	gwlStyle          = ^uintptr(15) + 1 // -16 as uintptr
+	gwlStyle          = ^uintptr(15) // -16 as uintptr (GWL_STYLE)
 	bsAutocheckbox    = 0x00000003
 	bsAutoradioButton = 0x00000004
 
@@ -514,9 +516,11 @@ func showSettingsDialog(cfg *config.Config, configPath string, iconBytes []byte)
 	x := int32((int(sw) - winW) / 2)
 	y := int32((int(sh) - winH) / 2)
 
+	// WS_EX_CONTROLPARENT enables IsDialogMessage tab navigation.
+	const wsExControlParent = 0x00010000
 	title, _ := syscall.UTF16PtrFromString("Z-API Proxy — Settings")
 	hwnd, _, _ := pCreateWindowExW.Call(
-		0, uintptr(settingsClassAtom), uintptr(unsafe.Pointer(title)),
+		wsExControlParent, uintptr(settingsClassAtom), uintptr(unsafe.Pointer(title)),
 		uintptr(wsCaption|wsSysMenu|wsThickframe|wsMinimizeBox|wsMaximizeBox|wsVscroll),
 		uintptr(x), uintptr(y), uintptr(winW), uintptr(winH),
 		0, 0, 0, 0,
@@ -786,6 +790,16 @@ func showSettingsDialog(cfg *config.Config, configPath string, iconBytes []byte)
 		if ret == 0 {
 			break
 		}
+		// IsDialogMessage handles Tab/Shift+Tab, arrow keys on radio
+		// buttons, and Enter on the default button. Without it, child
+		// controls are non-interactive.
+		processed, _, _ := pIsDialogMessageW.Call(hwnd, uintptr(unsafe.Pointer(&m)))
+		if processed != 0 {
+			continue
+		}
+		// TranslateMessage converts WM_KEYDOWN to WM_CHAR so edit
+		// controls can process typed characters.
+		pTranslateMessage.Call(uintptr(unsafe.Pointer(&m)))
 		pDispatchMessageW.Call(uintptr(unsafe.Pointer(&m)))
 	}
 }

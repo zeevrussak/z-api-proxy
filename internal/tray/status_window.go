@@ -303,6 +303,11 @@ func showTunnelWindow(tunnelMgr *tunnel.Manager) (string, bool) {
 		if ret == 0 {
 			break
 		}
+		processed, _, _ := pIsDialogMessageW.Call(hwnd, uintptr(unsafe.Pointer(&m)))
+		if processed != 0 {
+			continue
+		}
+		pTranslateMessage.Call(uintptr(unsafe.Pointer(&m)))
 		pDispatchMessageW.Call(uintptr(unsafe.Pointer(&m)))
 	}
 

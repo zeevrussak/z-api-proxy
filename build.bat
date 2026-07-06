@@ -7,6 +7,9 @@ setlocal enabledelayedexpansion
 ::  placing all artifacts in releases/.
 :: ============================================================
 
+:: --- Kill any running instances so we can overwrite the binary ---
+taskkill /f /im z-api-proxy.exe >nul 2>&1
+
 :: --- Read version from VERSION file ---
 for /f "delims=" %%v in (VERSION) do set VERSION=%%v
 set VERSION=%VERSION: =%

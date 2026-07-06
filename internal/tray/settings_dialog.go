@@ -90,6 +90,7 @@ const (
 	idSave         = 2015
 	idCancel       = 2016
 	idWorkerURLEd  = 2017
+	idWorkerHostEd = 2019
 	idTestConn     = 2018
 )
 
@@ -125,8 +126,9 @@ type settingsDialogState struct {
 	hwndAcctID     uintptr
 	hwndAPIToken   uintptr
 	hwndWorkerName uintptr
-	hwndWorkerURL  uintptr
-	hwndTestConn   uintptr
+	hwndWorkerURL    uintptr
+	hwndWorkerHost   uintptr
+	hwndTestConn     uintptr
 	hwndModels     uintptr
 	hwndSave       uintptr
 	hwndCancel     uintptr
@@ -498,9 +500,10 @@ func saveSettings(hwnd uintptr) {
 			Hostname: getControlText(s.hwndHostname),
 		},
 		Cloudflare: config.CloudflareConfig{
-			AccountID:  getControlText(s.hwndAcctID),
-			APIToken:   getControlText(s.hwndAPIToken),
-			WorkerName: getControlText(s.hwndWorkerName),
+			AccountID:      getControlText(s.hwndAcctID),
+			APIToken:       getControlText(s.hwndAPIToken),
+			WorkerName:     getControlText(s.hwndWorkerName),
+			WorkerHostname: getControlText(s.hwndWorkerHost),
 		},
 		Models: s.models,
 	}
@@ -795,6 +798,10 @@ func showSettingsDialog(cfg *config.Config, configPath string, iconBytes []byte)
 	hwndWorkerURL := createEdit(idWorkerURLEd, existingWorkerURL, mx+lw+gap, yPos, fw, ch, false)
 	addLayout(hwndWorkerURL, lfStretch)
 	yPos += ch + gap
+	createLabel("Custom Domain:", mx, yPos, lw, ch)
+	hwndWorkerHostname := createEdit(idWorkerHostEd, cfg.Cloudflare.WorkerHostname, mx+lw+gap, yPos, fw, ch, false)
+	addLayout(hwndWorkerHostname, lfStretch)
+	yPos += ch + gap
 
 	// ── Model Mappings section ──
 	yPos += gap
@@ -861,6 +868,7 @@ func showSettingsDialog(cfg *config.Config, configPath string, iconBytes []byte)
 	settingsState.hwndAPIToken = hwndAPIToken
 	settingsState.hwndWorkerName = hwndWorkerName
 	settingsState.hwndWorkerURL = hwndWorkerURL
+	settingsState.hwndWorkerHost = hwndWorkerHostname
 	settingsState.hwndTestConn = hwndTestConn
 	settingsState.hwndModels = hwndModels
 	settingsState.hwndSave = hwndSave

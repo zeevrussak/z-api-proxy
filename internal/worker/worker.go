@@ -299,11 +299,86 @@ func Deploy(cfg *config.Config) (*DeployResult, error) {
 		workerURL = fmt.Sprintf("https://%s.workers.dev", name)
 	}
 
+	// Attach custom domain if configured.
+	finalURL := workerURL
+	if cfg.Cloudflare.WorkerHostname != "" {
+		hostname := strings.TrimPrefix(strings.TrimPrefix(cfg.Cloudflare.WorkerHostname, "https://"), "http://")
+		customURL, err := attachCustomDomain(client, cfg, name, hostname)
+		if err != nil {
+			log.Printf("worker: warning — custom domain setup failed: %v", err)
+		} else {
+			finalURL = customURL
+			log.Printf("worker: custom domain attached — %s", customURL)
+		}
+	}
+
 	return &DeployResult{
-		URL:       workerURL,
+		URL:       finalURL,
 		Script:    script,
 		AccountID: cfg.Cloudflare.AccountID,
 	}, nil
+}
+
+// attachCustomDomain links a custom hostname (e.g. proxy.yourdomain.com)
+// to the Worker via the Cloudflare Workers Custom Domains API.
+// This automatically creates the required DNS record and route.
+func attachCustomDomain(client *http.Client, cfg *config.Config, workerName, hostname string) (string, error) {
+	// Extract domain from hostname for zone lookup.
+	parts := strings.SplitN(hostname, ".", 2)
+	if len(parts) < 2 {
+		return "", fmt.Errorf("invalid hostname %q", hostname)
+	}
+	domain := parts[1]
+
+	// Find zone ID.
+	zoneURL := fmt.Sprintf("%s/zones?name=%s", apiBaseOverride, domain)
+	zoneReq, _ := http.NewRequest("GET", zoneURL, nil)
+	zoneReq.Header.Set("Authorization", "Bearer "+cfg.Cloudflare.APIToken)
+	zoneResp, err := client.Do(zoneReq)
+	if err != nil {
+		return "", fmt.Errorf("zone lookup failed: %w", err)
+	}
+	zoneBody, _ := io.ReadAll(zoneResp.Body)
+	zoneResp.Body.Close()
+
+	var zoneResult struct {
+		Result []struct {
+			ID string `json:"id"`
+		} `json:"result"`
+	}
+	if json.Unmarshal(zoneBody, &zoneResult) != nil || len(zoneResult.Result) == 0 {
+		return "", fmt.Errorf("zone not found for domain %q — add it to Cloudflare first", domain)
+	}
+	zoneID := zoneResult.Result[0].ID
+
+	// Attach custom domain via Workers Domains API.
+	domainsURL := fmt.Sprintf("%s/accounts/%s/workers/domains", apiBaseOverride, cfg.Cloudflare.AccountID)
+	domainsBody := map[string]string{
+		"environment": "production",
+		"hostname":    hostname,
+		"service":     workerName,
+		"zone_id":     zoneID,
+	}
+	domainsJSON, _ := json.Marshal(domainsBody)
+	domainsReq, _ := http.NewRequest("PUT", domainsURL, bytes.NewReader(domainsJSON))
+	domainsReq.Header.Set("Authorization", "Bearer "+cfg.Cloudflare.APIToken)
+	domainsReq.Header.Set("Content-Type", "application/json")
+
+	domainsResp, err := client.Do(domainsReq)
+	if err != nil {
+		return "", fmt.Errorf("custom domain API call failed: %w", err)
+	}
+	domainsRespBody, _ := io.ReadAll(domainsResp.Body)
+	domainsResp.Body.Close()
+
+	if domainsResp.StatusCode != http.StatusOK && domainsResp.StatusCode != 201 {
+		var cfErr cfResponse
+		json.Unmarshal(domainsRespBody, &cfErr)
+		return "", fmt.Errorf("custom domain API returned HTTP %d: %s",
+			domainsResp.StatusCode, cfErr.ErrorString())
+	}
+
+	return "https://" + hostname, nil
 }
 
 // setSecret sets a Cloudflare Worker secret via the API.

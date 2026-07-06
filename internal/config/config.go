@@ -81,9 +81,10 @@ type SecurityConfig struct {
 // CloudflareConfig holds settings for deploying a Cloudflare Worker.
 // APIToken is populated from secrets.toml.
 type CloudflareConfig struct {
-	AccountID  string `toml:"account_id"`
-	APIToken   string `toml:"-"` // injected from secrets.toml
-	WorkerName string `toml:"worker_name"`
+	AccountID       string `toml:"account_id"`
+	APIToken        string `toml:"-"` // injected from secrets.toml
+	WorkerName      string `toml:"worker_name"`
+	WorkerHostname  string `toml:"worker_hostname"`
 }
 
 // ModelMapping defines a single bidirectional model-names translation.

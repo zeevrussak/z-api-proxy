@@ -3,11 +3,13 @@ package tray
 import (
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"runtime"
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"github.com/pelletier/go-toml/v2"
@@ -87,6 +89,7 @@ const (
 	idSave         = 2015
 	idCancel       = 2016
 	idWorkerURLEd  = 2017
+	idTestConn     = 2018
 )
 
 // layoutControl describes a control that needs to be repositioned on resize.
@@ -122,6 +125,7 @@ type settingsDialogState struct {
 	hwndAPIToken   uintptr
 	hwndWorkerName uintptr
 	hwndWorkerURL  uintptr
+	hwndTestConn   uintptr
 	hwndModels     uintptr
 	hwndSave       uintptr
 	hwndCancel     uintptr
@@ -215,12 +219,12 @@ func settingsWindowProc(hwnd, msg, wParam, lParam uintptr) uintptr {
 				pDestroyWindow.Call(hwnd)
 			case idCancel:
 				pDestroyWindow.Call(hwnd)
-			case idShowKey:
-				togglePasswordVisibility()
 			case idModelAdd:
 				addModelEntry(settingsState.hwndModels)
 			case idModelRemove:
 				removeModelEntry(settingsState.hwndModels)
+			case idTestConn:
+				go testConnectionFromSettings()
 			}
 		}
 
@@ -264,23 +268,62 @@ func settingsWindowProc(hwnd, msg, wParam, lParam uintptr) uintptr {
 	return ret
 }
 
-// togglePasswordVisibility toggles ES_PASSWORD on the API key edit control.
-func togglePasswordVisibility() {
-	if settingsState == nil || settingsState.hwndAPIKey == 0 {
+// testConnectionFromSettings reads the API key from the settings dialog
+// and tests it against the active endpoint (Worker URL, tunnel, or upstream).
+func testConnectionFromSettings() {
+	if settingsState == nil {
 		return
 	}
-	// Read the checkbox state.
-	checked, _, _ := pSendMessageW.Call(settingsState.hwndShowKey, bmGetCheck, 0, 0)
-	style, _, _ := pGetWindowLong.Call(settingsState.hwndAPIKey, gwlStyle)
-	if checked == bstChecked {
-		// Remove password style to show the key.
-		pSetWindowLong.Call(settingsState.hwndAPIKey, gwlStyle, style & ^uintptr(esPassword))
-	} else {
-		// Add password style to mask the key.
-		pSetWindowLong.Call(settingsState.hwndAPIKey, gwlStyle, style | uintptr(esPassword))
+	s := settingsState
+	apiKey := getControlText(s.hwndAPIKey)
+
+	if apiKey == "" {
+		messageBox("No API key entered. Enter your z.ai API key first.",
+			"Z-API Proxy — Test", mbIconWarning)
+		return
 	}
-	// Force redraw.
-	pInvalidateRect.Call(settingsState.hwndAPIKey, 0, 1)
+
+	// Determine which endpoint to test.
+	var testURL string
+	if workerURL := getControlText(s.hwndWorkerURL); strings.TrimSpace(workerURL) != "" {
+		testURL = strings.TrimSpace(workerURL) + "/health"
+	} else {
+		cfg := settingsState.cfg
+		testURL = strings.TrimSuffix(cfg.Upstream.BaseURL, "/") + "/models"
+	}
+
+	client := &http.Client{Timeout: 15 * time.Second}
+	req, err := http.NewRequest("GET", testURL, nil)
+	if err != nil {
+		messageBox("Failed to build request:\n\n"+err.Error(),
+			"Z-API Proxy — Test", mbIconError)
+		return
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		messageBox("Connection failed:\n\n"+err.Error(),
+			"Z-API Proxy — Test", mbIconError)
+		return
+	}
+	defer resp.Body.Close()
+
+	switch {
+	case resp.StatusCode == 200:
+		messageBox("Connection successful.\n\nThe API key is valid and the endpoint is reachable.\n\nTested: "+testURL,
+			"Z-API Proxy — Test", mbIconInfo)
+	case resp.StatusCode == 401 || resp.StatusCode == 403:
+		messageBox("Authentication failed (HTTP "+fmt.Sprintf("%d", resp.StatusCode)+").\n\n"+
+			"The endpoint is reachable but the API key was rejected.\n"+
+			"If testing against a Worker, the key in the Worker's secrets\n"+
+			"may differ from the one entered here.\n\n"+
+			"Tested: "+testURL,
+			"Z-API Proxy — Test", mbIconWarning)
+	default:
+		messageBox(fmt.Sprintf("Endpoint returned HTTP %d.\n\nTested: %s", resp.StatusCode, testURL),
+			"Z-API Proxy — Test", mbIconWarning)
+	}
 }
 
 // getControlText reads text from a Win32 edit control.
@@ -639,16 +682,17 @@ func showSettingsDialog(cfg *config.Config, configPath string, iconBytes []byte)
 	addLayout(hwndBaseURL, lfStretch)
 	yPos += ch + gap
 	createLabel("API Key:", mx, yPos, lw, ch)
-	hwndAPIKey := createEdit(idAPIKeyEd, cfg.Upstream.APIKey, mx+lw+gap, yPos, fw-90, ch, true)
+	hwndAPIKey := createEdit(idAPIKeyEd, cfg.Upstream.APIKey, mx+lw+gap, yPos, fw-110, ch, true)
 	addLayout(hwndAPIKey, lfStretch)
-	showKeyLabel, _ := syscall.UTF16PtrFromString("Show")
-	hwndShowKey, _, _ := pCreateWindowExW.Call(
-		0, uintptr(unsafe.Pointer(btnClass)), uintptr(unsafe.Pointer(showKeyLabel)),
-		uintptr(wsChild|wsVisible|bsAutocheckbox),
-		uintptr(mx+lw+gap+fw-80), uintptr(yPos), 80, ch,
-		hwnd, idShowKey, 0, 0,
+	// Test Connection button
+	testConnLabel, _ := syscall.UTF16PtrFromString("Test Connection")
+	hwndTestConn, _, _ := pCreateWindowExW.Call(
+		0, uintptr(unsafe.Pointer(btnClass)), uintptr(unsafe.Pointer(testConnLabel)),
+		uintptr(wsChild|wsVisible|wsTabstop),
+		uintptr(mx+lw+gap+fw-100), uintptr(yPos), 100, ch,
+		hwnd, idTestConn, 0, 0,
 	)
-	pSendMessageW.Call(hwndShowKey, wmSetFont, fontHandle, 1)
+	pSendMessageW.Call(hwndTestConn, wmSetFont, fontHandle, 1)
 	yPos += ch + gap
 
 	// ── Security section ──
@@ -798,10 +842,10 @@ func showSettingsDialog(cfg *config.Config, configPath string, iconBytes []byte)
 	settingsState.hwndAPIToken = hwndAPIToken
 	settingsState.hwndWorkerName = hwndWorkerName
 	settingsState.hwndWorkerURL = hwndWorkerURL
+	settingsState.hwndTestConn = hwndTestConn
 	settingsState.hwndModels = hwndModels
 	settingsState.hwndSave = hwndSave
 	settingsState.hwndCancel = hwndCancel
-	settingsState.hwndShowKey = hwndShowKey
 	settingsState.models = modelsCopy
 
 	// Record total content height for scrollbar calculations.
@@ -844,7 +888,7 @@ func scrollAllChildren(dy int32) {
 		s.hwndListen, s.hwndBaseURL, s.hwndAPIKey, s.hwndVerify,
 		s.hwndQuick, s.hwndNamed, s.hwndToken, s.hwndHostname,
 		s.hwndAcctID, s.hwndAPIToken, s.hwndWorkerName, s.hwndModels,
-		s.hwndShowKey,
+		s.hwndTestConn,
 	}
 	for _, hwnd := range s.layout {
 		allHwnds = append(allHwnds, hwnd.hwnd)

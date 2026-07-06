@@ -7,13 +7,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
-	"unsafe"
 
 	"github.com/getlantern/systray"
 	"github.com/lxn/walk"
+	. "github.com/lxn/walk/declarative"
 	"golang.org/x/sys/windows/registry"
 
 	"z-api-proxy/internal/config"
@@ -705,34 +706,58 @@ func updateTOMLValue(tomlText, section, key, value string) string {
 	return strings.Join(lines, "\n")
 }
 
-// askApiMode shows a dialog asking which API format to configure in Cursor.
+// askApiMode shows a walk dialog with a ComboBox for API format selection.
 // Returns "openai", "anthropic", "both", or "" (cancelled).
 func askApiMode() string {
-	// Use a Win32 MessageBox with yes/no/cancel buttons.
-	// IDYES=6 (OpenAI), IDNO=7 (Anthropic), IDCANCEL=2 (Both)
-	const (
-		mbYesNoCancel  uintptr = 0x00000003
-		mbIconQuestion uintptr = 0x00000020
-		mbDefButton4   uintptr = 0x00000300
-	)
-	title, _ := syscall.UTF16PtrFromString("Z-API Proxy — Cursor Setup")
-	text, _ := syscall.UTF16PtrFromString(
-		"Configure Cursor for which API format?\n\n" +
-			"Yes = OpenAI (chat/completions)\n" +
-			"No = Anthropic (messages)\n" +
-			"Cancel = Both")
-	ret, _, _ := procMessageBox.Call(
-		0,
-		uintptr(unsafe.Pointer(text)),
-		uintptr(unsafe.Pointer(title)),
-		uintptr(mbYesNoCancel|mbIconQuestion|mbDefButton4),
-	)
-	switch ret {
-	case 6: // IDYES
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	choices := []string{"OpenAI (chat/completions)", "Anthropic (messages)", "Both"}
+	accepted := false
+	var cb *walk.ComboBox
+	var dlg *walk.Dialog
+
+	_, err := Dialog{
+		AssignTo: &dlg,
+		Title:    "Z-API Proxy — Cursor Setup",
+		MinSize:  Size{Width: 350, Height: 150},
+		Layout:   VBox{Margins: Margins{Left: 15, Top: 15, Right: 15, Bottom: 10}, Spacing: 10},
+		Children: []Widget{
+			Label{Text: "Configure Cursor for which API format?"},
+			ComboBox{AssignTo: &cb, Model: choices, CurrentIndex: 2},
+			Composite{
+				Layout: HBox{MarginsZero: true, Spacing: 8},
+				Children: []Widget{
+					HSpacer{},
+					PushButton{
+						Text: "OK",
+						OnClicked: func() {
+							accepted = true
+							dlg.Accept()
+						},
+					},
+					PushButton{
+						Text: "Cancel",
+						OnClicked: func() {
+							accepted = false
+							dlg.Cancel()
+						},
+					},
+				},
+			},
+		},
+	}.Run(nil)
+
+	if err != nil || !accepted || cb == nil {
+		return ""
+	}
+
+	switch cb.CurrentIndex() {
+	case 0:
 		return "openai"
-	case 7: // IDNO
+	case 1:
 		return "anthropic"
-	default: // IDCANCEL or closed
+	default:
 		return "both"
 	}
 }

@@ -6,8 +6,10 @@ package tray
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/lxn/walk"
@@ -20,6 +22,9 @@ import (
 
 // showSettingsDialogWalk creates the settings dialog using lxn/walk.
 func showSettingsDialogWalk(cfg *config.Config, configPath string) {
+	// Walk requires a dedicated OS thread for its message loop.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 	var dlg *walk.MainWindow
 
 	// Widget handles for reading values on save.
@@ -217,7 +222,7 @@ func showSettingsDialogWalk(cfg *config.Config, configPath string) {
 	}.Run()
 
 	if err != nil {
-		// Fallback to raw Win32 dialog if walk fails.
+		log.Printf("walk dialog error: %v — falling back to raw Win32", err)
 		showSettingsDialog(cfg, configPath, nil)
 	}
 }

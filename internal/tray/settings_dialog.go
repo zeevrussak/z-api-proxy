@@ -137,6 +137,7 @@ type settingsDialogState struct {
 	hwndShowKey    uintptr
 	models         []config.ModelMapping
 	layout         []layoutControl
+	allChildren    []uintptr
 	scrollPos      int32
 	contentHeight  int32
 }
@@ -642,6 +643,9 @@ func showSettingsDialog(cfg *config.Config, configPath string, iconBytes []byte)
 	ch := uintptr(22)
 	_ = ch
 	gap := uintptr(8)
+
+	// allChildren collects every child window handle for scrolling.
+	var allChildren []uintptr
 	yPos := uintptr(12)
 
 	addLayout := func(hwnd uintptr, flags layoutFlags) {
@@ -658,6 +662,7 @@ func showSettingsDialog(cfg *config.Config, configPath string, iconBytes []byte)
 			hwnd, 0, 0, 0,
 		)
 		pSendMessageW.Call(lh, wmSetFont, fontHandle, 1)
+		allChildren = append(allChildren, lh)
 		return lh
 	}
 
@@ -675,6 +680,7 @@ func showSettingsDialog(cfg *config.Config, configPath string, iconBytes []byte)
 			hwnd, uintptr(id), 0, 0,
 		)
 		pSendMessageW.Call(eh, wmSetFont, fontHandle, 1)
+		allChildren = append(allChildren, eh)
 		return eh
 	}
 
@@ -687,6 +693,7 @@ func showSettingsDialog(cfg *config.Config, configPath string, iconBytes []byte)
 			hwnd, 0, 0, 0,
 		)
 		pSendMessageW.Call(sh2, wmSetFont, fontHandle, 1)
+		allChildren = append(allChildren, sh2)
 		*y += ch + gap
 	}
 
@@ -726,7 +733,7 @@ func showSettingsDialog(cfg *config.Config, configPath string, iconBytes []byte)
 	)
 	pSendMessageW.Call(hwndTestConn, wmSetFont, fontHandle, 1)
 	yPos += ch + gap
-	createLabel("Cursor Key:", mx, yPos, lw, ch)
+	createLabel("Gateway Worker Key:", mx, yPos, lw, ch)
 	hwndCursorKey := createEdit(idCursorKeyEd, cfg.Proxy.CursorKey, mx+lw+gap, yPos, fw, ch, true)
 	addLayout(hwndCursorKey, lfStretch)
 	yPos += ch + gap
@@ -889,6 +896,7 @@ func showSettingsDialog(cfg *config.Config, configPath string, iconBytes []byte)
 	settingsState.hwndSave = hwndSave
 	settingsState.hwndCancel = hwndCancel
 	settingsState.models = modelsCopy
+	settingsState.allChildren = allChildren
 
 	// Record total content height for scrollbar calculations.
 	settingsState.contentHeight = int32(yPos) + int32(gap) + 30 + int32(gap)
@@ -926,16 +934,7 @@ func scrollAllChildren(dy int32) {
 		return
 	}
 	s := settingsState
-	allHwnds := []uintptr{
-		s.hwndListen, s.hwndBaseURL, s.hwndAPIKey, s.hwndVerify,
-		s.hwndQuick, s.hwndNamed, s.hwndToken, s.hwndHostname,
-		s.hwndAcctID, s.hwndAPIToken, s.hwndWorkerName, s.hwndModels,
-		s.hwndTestConn,
-	}
-	for _, hwnd := range s.layout {
-		allHwnds = append(allHwnds, hwnd.hwnd)
-	}
-	for _, hwnd := range allHwnds {
+	for _, hwnd := range s.allChildren {
 		if hwnd == 0 {
 			continue
 		}

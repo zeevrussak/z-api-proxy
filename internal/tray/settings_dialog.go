@@ -86,6 +86,7 @@ const (
 	idShowKey      = 2014
 	idSave         = 2015
 	idCancel       = 2016
+	idWorkerURLEd  = 2017
 )
 
 // layoutControl describes a control that needs to be repositioned on resize.
@@ -120,6 +121,7 @@ type settingsDialogState struct {
 	hwndAcctID     uintptr
 	hwndAPIToken   uintptr
 	hwndWorkerName uintptr
+	hwndWorkerURL  uintptr
 	hwndModels     uintptr
 	hwndSave       uintptr
 	hwndCancel     uintptr
@@ -501,6 +503,15 @@ func saveSettings(hwnd uintptr) {
 	}
 
 	log.Printf("settings: saved config to %s, secrets to %s", s.configPath, secretsPath)
+
+	// Save or clear Worker URL preference.
+	workerURL := getControlText(s.hwndWorkerURL)
+	workerURL = strings.TrimSpace(workerURL)
+	if workerURL != "" {
+		saveWorkerURL(workerURL)
+	} else {
+		clearWorkerURL()
+	}
 }
 
 // showSettingsDialog creates and runs the settings form.
@@ -716,6 +727,11 @@ func showSettingsDialog(cfg *config.Config, configPath string, iconBytes []byte)
 	hwndWorkerName := createEdit(idWorkerNameEd, workerName, mx+lw+gap, yPos, fw, ch, false)
 	addLayout(hwndWorkerName, lfStretch)
 	yPos += ch + gap
+	createLabel("Worker URL:", mx, yPos, lw, ch)
+	existingWorkerURL := loadWorkerURL()
+	hwndWorkerURL := createEdit(idWorkerURLEd, existingWorkerURL, mx+lw+gap, yPos, fw, ch, false)
+	addLayout(hwndWorkerURL, lfStretch)
+	yPos += ch + gap
 
 	// ── Model Mappings section ──
 	yPos += gap
@@ -781,6 +797,7 @@ func showSettingsDialog(cfg *config.Config, configPath string, iconBytes []byte)
 	settingsState.hwndAcctID = hwndAcctID
 	settingsState.hwndAPIToken = hwndAPIToken
 	settingsState.hwndWorkerName = hwndWorkerName
+	settingsState.hwndWorkerURL = hwndWorkerURL
 	settingsState.hwndModels = hwndModels
 	settingsState.hwndSave = hwndSave
 	settingsState.hwndCancel = hwndCancel

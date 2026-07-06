@@ -222,8 +222,7 @@ func showSettingsDialogWalk(cfg *config.Config, configPath string) {
 	}.Run()
 
 	if err != nil {
-		log.Printf("walk dialog error: %v — falling back to raw Win32", err)
-		showSettingsDialog(cfg, configPath, nil)
+		log.Printf("walk dialog error: %v", err)
 	}
 }
 

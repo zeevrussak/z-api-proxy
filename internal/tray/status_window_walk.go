@@ -75,7 +75,10 @@ func showTunnelWindowWalk(tunnelMgr *tunnel.Manager) (string, bool) {
 	}.Run()
 
 	if err != nil {
-		return showTunnelWindow(tunnelMgr) // fallback
+		walk.MsgBox(nil, "Z-API Proxy — Tunnel",
+			fmt.Sprintf("Failed to start tunnel:\n\n%s", err.Error()),
+			walk.MsgBoxIconError)
+		return "", false
 	}
 
 	// Poll for results while window is open (walk.Run blocks until Close).
@@ -114,9 +117,5 @@ func showTunnelWindowWalkV2(tunnelMgr *tunnel.Manager) (string, bool) {
 
 // copyToClipWalk copies text to clipboard via walk.
 func copyToClipWalk(text string) {
-	if err := walk.Clipboard().SetText(text); err == nil {
-		return
-	}
-	// Fallback to PowerShell.
-	copyToClip(text)
+	walk.Clipboard().SetText(text)
 }

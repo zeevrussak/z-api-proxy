@@ -13,6 +13,7 @@ import (
 	"unsafe"
 
 	"github.com/getlantern/systray"
+	"github.com/lxn/walk"
 	"golang.org/x/sys/windows/registry"
 
 	"z-api-proxy/internal/config"
@@ -41,7 +42,16 @@ const (
 )
 
 func messageBox(text, title string, flags uintptr) {
-	messageBoxOrFallback(text, title, flags)
+	var icon walk.MsgBoxStyle
+	switch flags {
+	case mbIconError:
+		icon = walk.MsgBoxIconError
+	case mbIconWarning:
+		icon = walk.MsgBoxIconWarning
+	default:
+		icon = walk.MsgBoxIconInformation
+	}
+	walk.MsgBox(nil, title, text, icon)
 }
 
 // --- Worker URL preference ---

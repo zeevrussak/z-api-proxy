@@ -399,6 +399,19 @@ func relayoutControls() {
 	for _, m := range moves {
 		pMoveWindow.Call(m.hwnd, uintptr(m.x), uintptr(m.y), uintptr(m.w), uintptr(m.h), 1)
 	}
+
+	// Anchor Save/Cancel to bottom-right, always visible.
+	btnH := uintptr(30)
+	btnW := uintptr(90)
+	btnY := uintptr(rect.Bottom-rect.Top) - btnH - gap
+	if s.hwndSave != 0 {
+		saveX := clientW - btnW - mx - btnW - gap
+		pMoveWindow.Call(s.hwndSave, saveX, btnY, btnW, btnH, 1)
+	}
+	if s.hwndCancel != 0 {
+		cancelX := clientW - btnW - mx
+		pMoveWindow.Call(s.hwndCancel, cancelX, btnY, btnW, btnH, 1)
+	}
 }
 
 // saveSettings reads all control values and writes the config to disk.
@@ -814,7 +827,7 @@ func scrollAllChildren(dy int32) {
 		s.hwndListen, s.hwndBaseURL, s.hwndAPIKey, s.hwndVerify,
 		s.hwndQuick, s.hwndNamed, s.hwndToken, s.hwndHostname,
 		s.hwndAcctID, s.hwndAPIToken, s.hwndWorkerName, s.hwndModels,
-		s.hwndSave, s.hwndCancel, s.hwndShowKey,
+		s.hwndShowKey,
 	}
 	for _, hwnd := range s.layout {
 		allHwnds = append(allHwnds, hwnd.hwnd)

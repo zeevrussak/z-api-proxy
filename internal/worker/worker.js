@@ -45,6 +45,8 @@ export default {
       return new Response('OK', { status: 200 });
     }
 
+    // /v1/models is public — returns capabilities without auth.
+    // Cursor reads context_length and max_tokens from here.
     if (url.pathname === '/v1/models' || url.pathname === '/models') {
       const MODEL_SPECS = {
         'glm-5.2':        { ctx: 1048576, maxOut: 131072 },

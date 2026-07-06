@@ -38,10 +38,8 @@ export default {
     console.log('[z-api-proxy]   received key: ' + (sentPrefix ? sentPrefix + '...' : 'NONE'));
     console.log('[z-api-proxy]   accepted keys: [' + keyHints.join(', ') + ']');
 
+    // /health is public — just a liveness check.
     if (url.pathname === '/health') {
-      if (API_KEY && !acceptedKeys.some(k => k && sentKey === k)) {
-        return new Response('unauthorized', { status: 401 });
-      }
       return new Response('OK', { status: 200 });
     }
 

@@ -120,18 +120,35 @@ export default {
       return new Response('OK', { status: 200 });
     }
 
-    // Intercept /v1/models — return enhanced model data with context window.
-    // Cursor reads context_length to determine the context window size.
+    // Intercept /v1/models — return enhanced model data with per-model
+    // context windows and max output tokens.
     if (url.pathname === '/v1/models' || url.pathname === '/models') {
+      const MODEL_SPECS = {
+        'glm-5.2':        { ctx: 1048576, maxOut: 131072 },
+        'glm-5.1':        { ctx: 1048576, maxOut: 131072 },
+        'glm-5':          { ctx: 131072,  maxOut: 131072 },
+        'glm-5-turbo':    { ctx: 131072,  maxOut: 131072 },
+        'glm-5v-turbo':   { ctx: 131072,  maxOut: 131072 },
+        'glm-4.7':        { ctx: 131072,  maxOut: 131072 },
+        'glm-4.7-flash':  { ctx: 131072,  maxOut: 131072 },
+        'glm-4.7-flashx': { ctx: 131072,  maxOut: 131072 },
+        'glm-4.6':        { ctx: 200000,  maxOut: 131072 },
+        'glm-4.6v':       { ctx: 131072,  maxOut: 32768 },
+        'glm-4.5':        { ctx: 131072,  maxOut: 98304 },
+        'glm-4.5-air':    { ctx: 131072,  maxOut: 98304 },
+        'glm-4.5-flash':  { ctx: 131072,  maxOut: 98304 },
+        'glm-4.5v':       { ctx: 131072,  maxOut: 16384 },
+      };
       const models = [];
       for (const [cursorName, upstreamName] of FORWARD_MAP) {
+        const spec = MODEL_SPECS[upstreamName] || { ctx: 131072, maxOut: 65536 };
         models.push({
           id: cursorName,
           object: 'model',
           created: 1700000000,
           owned_by: 'z.ai',
-          context_length: 1048576,
-          max_tokens: 1048576
+          context_length: spec.ctx,
+          max_tokens: spec.maxOut
         });
       }
       const resp = { object: 'list', data: models };

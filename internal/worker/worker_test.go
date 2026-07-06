@@ -250,3 +250,100 @@ func deployWithServer(cfg *config.Config, serverURL string) (*DeployResult, erro
 	defer func() { apiBaseOverride = orig }()
 	return Deploy(cfg)
 }
+
+// TestGenerateScript_ModelSpecs verifies the Worker JS contains
+// accurate per-model context_length and max_tokens in the
+// /v1/models endpoint.
+func TestGenerateScript_ModelSpecs(t *testing.T) {
+	cfg := makeWorkerTestConfig()
+	// Add more models to test specs coverage.
+	cfg.Models = []config.ModelMapping{
+		{From: "z.ai/glm-5.2", To: "glm-5.2"},
+		{From: "z.ai/glm-4.6", To: "glm-4.6"},
+		{From: "z.ai/glm-4.5", To: "glm-4.5"},
+		{From: "z.ai/glm-4.5v", To: "glm-4.5v"},
+	}
+	script := GenerateScript(cfg)
+
+	// glm-5.2: 1M context, 128K output.
+	if !strings.Contains(script, "1048576") {
+		t.Error("script missing 1M context for glm-5.2/glm-5.1")
+	}
+	if !strings.Contains(script, "131072") {
+		t.Error("script missing 128K max output for GLM-5.x models")
+	}
+
+	// glm-4.6: 200K context.
+	if !strings.Contains(script, "200000") {
+		t.Error("script missing 200K context for glm-4.6")
+	}
+
+	// glm-4.5: 96K output.
+	if !strings.Contains(script, "98304") {
+		t.Error("script missing 96K max output for glm-4.5")
+	}
+
+	// glm-4.5v: 16K output.
+	if !strings.Contains(script, "16384") {
+		t.Error("script missing 16K max output for glm-4.5v")
+	}
+
+	// MODEL_SPECS object must exist.
+	if !strings.Contains(script, "MODEL_SPECS") {
+		t.Error("script missing MODEL_SPECS object")
+	}
+
+	// /v1/models endpoint must return context_length.
+	if !strings.Contains(script, "context_length") {
+		t.Error("script missing context_length field in models response")
+	}
+
+	// Must return max_tokens.
+	if !strings.Contains(script, "max_tokens") {
+		t.Error("script missing max_tokens field in models response")
+	}
+}
+
+// TestGenerateScript_ModelSpecsGLM52 verifies the exact values
+// for glm-5.2 — the flagship model with 1M context.
+func TestGenerateScript_ModelSpecsGLM52(t *testing.T) {
+	cfg := &config.Config{
+		Upstream: config.UpstreamConfig{
+			BaseURL: "https://api.z.ai/api/coding/paas/v4",
+			APIKey:  "test-key",
+		},
+		Models: []config.ModelMapping{
+			{From: "z.ai/glm-5.2", To: "glm-5.2"},
+		},
+	}
+	script := GenerateScript(cfg)
+
+	// The JS contains: 'glm-5.2': { ctx: 1048576, maxOut: 131072 }
+	// Verify all parts present for glm-5.2.
+	if !strings.Contains(script, "'glm-5.2'") {
+		t.Error("script missing glm-5.2 in MODEL_SPECS")
+	}
+	if !strings.Contains(script, "ctx: 1048576") {
+		t.Error("script missing 1M context in glm-5.2 spec")
+	}
+	if !strings.Contains(script, "maxOut: 131072") {
+		t.Error("script missing 128K maxOut in glm-5.2 spec")
+	}
+}
+
+// extractSection returns a portion of the script around a keyword.
+func extractSection(script, keyword string) string {
+	idx := strings.Index(script, keyword)
+	if idx < 0 {
+		return keyword + " not found"
+	}
+	start := idx - 20
+	if start < 0 {
+		start = 0
+	}
+	end := idx + 200
+	if end > len(script) {
+		end = len(script)
+	}
+	return script[start:end]
+}

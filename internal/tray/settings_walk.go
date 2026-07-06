@@ -36,6 +36,7 @@ func showSettingsDialogWalk(cfg *config.Config, configPath string) {
 	var modelsLB *walk.ListBox
 
 	models := cfg.Models
+	modelStrings := buildModelStrings(models)
 	apiStyles := []string{"OpenAI (chat/completions)", "Anthropic (messages)", "Both"}
 	tunnelModes := []string{"Quick (ephemeral URL)", "Named (stable URL)"}
 
@@ -162,7 +163,7 @@ func showSettingsDialogWalk(cfg *config.Config, configPath string) {
 						Children: []Widget{
 							ListBox{
 								AssignTo: &modelsLB,
-								Model:    modelMappingModel{items: models},
+								Model:    modelMappingModel{items: modelStrings},
 								MinSize:  Size{Height: 120},
 							},
 							Composite{
@@ -172,13 +173,15 @@ func showSettingsDialogWalk(cfg *config.Config, configPath string) {
 										models = append(models, config.ModelMapping{
 											From: "z.ai/new-model", To: "new-model",
 										})
-										modelsLB.SetModel(modelMappingModel{items: models})
+										modelStrings = buildModelStrings(models)
+modelsLB.SetModel(&modelMappingModel{items: modelStrings})
 									}},
 									PushButton{Text: "Remove", OnClicked: func() {
 										i := modelsLB.CurrentIndex()
 										if i >= 0 && i < len(models) {
 											models = append(models[:i], models[i+1:]...)
-											modelsLB.SetModel(modelMappingModel{items: models})
+											modelStrings = buildModelStrings(models)
+modelsLB.SetModel(&modelMappingModel{items: modelStrings})
 										}
 									}},
 								},
@@ -275,17 +278,26 @@ func loadApiModePref() string {
 	return strings.TrimSpace(string(data))
 }
 
-// modelMappingModel provides data for the ListBox.
+// modelMappingModel provides data for the walk ListBox.
 type modelMappingModel struct {
-	items []config.ModelMapping
+	items []string
 }
 
-func (m modelMappingModel) ItemCount() int { return len(m.items) }
-func (m modelMappingModel) Value(i int) interface{} {
+func (m *modelMappingModel) ItemCount() int { return len(m.items) }
+func (m *modelMappingModel) Value(i int) interface{} {
 	if i < 0 || i >= len(m.items) {
 		return ""
 	}
-	return fmt.Sprintf("%s → %s", m.items[i].From, m.items[i].To)
+	return m.items[i]
+}
+
+// buildModelStrings converts ModelMappings to display strings.
+func buildModelStrings(models []config.ModelMapping) []string {
+	result := make([]string, len(models))
+	for i, m := range models {
+		result[i] = fmt.Sprintf("%s → %s", m.From, m.To)
+	}
+	return result
 }
 
 // saveSettingsWalk writes config + secrets from walk dialog values.

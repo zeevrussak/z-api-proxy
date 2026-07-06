@@ -732,6 +732,7 @@ func showSettingsDialog(cfg *config.Config, configPath string, iconBytes []byte)
 		hwnd, idTestConn, 0, 0,
 	)
 	pSendMessageW.Call(hwndTestConn, wmSetFont, fontHandle, 1)
+	allChildren = append(allChildren, hwndTestConn)
 	yPos += ch + gap
 	createLabel("Gateway Worker Key:", mx, yPos, lw, ch)
 	hwndCursorKey := createEdit(idCursorKeyEd, cfg.Proxy.CursorKey, mx+lw+gap, yPos, fw, ch, true)
@@ -751,6 +752,7 @@ func showSettingsDialog(cfg *config.Config, configPath string, iconBytes []byte)
 	)
 	pSendMessageW.Call(hwndVerify, wmSetFont, fontHandle, 1)
 	pSendMessageW.Call(hwndVerify, bmSetCheck, bstChecked, 0)
+	allChildren = append(allChildren, hwndVerify)
 	yPos += ch + gap
 
 	// ── Tunnel section ──
@@ -769,6 +771,7 @@ func showSettingsDialog(cfg *config.Config, configPath string, iconBytes []byte)
 	if !isNamed {
 		pSendMessageW.Call(hwndQuick, bmSetCheck, bstChecked, 0)
 	}
+	allChildren = append(allChildren, hwndQuick)
 	yPos += ch + gap
 	namedLabel, _ := syscall.UTF16PtrFromString("Named (stable URL)")
 	namedStyle := wsChild | wsVisible | bsAutoradioButton | wsTabstop
@@ -782,6 +785,7 @@ func showSettingsDialog(cfg *config.Config, configPath string, iconBytes []byte)
 	if isNamed {
 		pSendMessageW.Call(hwndNamed, bmSetCheck, bstChecked, 0)
 	}
+	allChildren = append(allChildren, hwndNamed)
 	yPos += ch + gap
 	createLabel("Token:", mx, yPos, lw, ch)
 	hwndToken := createEdit(idTokenEd, cfg.Tunnel.Token, mx+lw+gap, yPos, fw, ch, true)
@@ -830,29 +834,33 @@ func showSettingsDialog(cfg *config.Config, configPath string, iconBytes []byte)
 	listClass, _ := syscall.UTF16PtrFromString("ListBox")
 	hwndModels, _, _ := pCreateWindowExW.Call(
 		0, uintptr(unsafe.Pointer(listClass)), 0,
-		uintptr(wsChild|wsVisible|lbsNotify|wsVscroll|wsBorder),
+		uintptr(wsChild|wsVisible|lbsNotify|wsBorder),
 		uintptr(mx), uintptr(yPos), uintptr(fw+lw), 120,
 		hwnd, idModelsList, 0, 0,
 	)
 	pSendMessageW.Call(hwndModels, wmSetFont, fontHandle, 1)
 	addLayout(hwndModels, lfFullWidth)
+	allChildren = append(allChildren, hwndModels)
 	yPos += 125
 
 	addLabel, _ := syscall.UTF16PtrFromString("Add")
-	_, _, _ = pCreateWindowExW.Call(
+	hwndAdd, _, _ := pCreateWindowExW.Call(
 		0, uintptr(unsafe.Pointer(btnClass)), uintptr(unsafe.Pointer(addLabel)),
 		uintptr(wsChild|wsVisible),
 		uintptr(mx), uintptr(yPos), 80, ch,
 		hwnd, idModelAdd, 0, 0,
 	)
-	pSendMessageW.Call(hwndModels, wmSetFont, fontHandle, 1)
+	pSendMessageW.Call(hwndAdd, wmSetFont, fontHandle, 1)
+	allChildren = append(allChildren, hwndAdd)
 	removeLabel, _ := syscall.UTF16PtrFromString("Remove")
-	_, _, _ = pCreateWindowExW.Call(
+	hwndRemove, _, _ := pCreateWindowExW.Call(
 		0, uintptr(unsafe.Pointer(btnClass)), uintptr(unsafe.Pointer(removeLabel)),
 		uintptr(wsChild|wsVisible),
 		uintptr(mx+90), uintptr(yPos), 80, ch,
 		hwnd, idModelRemove, 0, 0,
 	)
+	pSendMessageW.Call(hwndRemove, wmSetFont, fontHandle, 1)
+	allChildren = append(allChildren, hwndRemove)
 	yPos += ch + gap*2
 
 	// ── Buttons ──

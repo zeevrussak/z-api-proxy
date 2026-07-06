@@ -15,6 +15,7 @@ import (
 	"github.com/pelletier/go-toml/v2"
 
 	"z-api-proxy/internal/config"
+	"z-api-proxy/internal/worker"
 )
 
 // Additional Win32 procedures for the settings dialog.
@@ -283,14 +284,27 @@ func testConnectionFromSettings() {
 		return
 	}
 
-	// Determine which endpoint to test.
-	var testURL string
-	if workerURL := getControlText(s.hwndWorkerURL); strings.TrimSpace(workerURL) != "" {
-		testURL = strings.TrimSpace(workerURL) + "/health"
-	} else {
-		cfg := settingsState.cfg
-		testURL = strings.TrimSuffix(cfg.Upstream.BaseURL, "/") + "/models"
+	// If Worker URL is set, do a full end-to-end chat test.
+	if workerURL := strings.TrimSpace(getControlText(s.hwndWorkerURL)); workerURL != "" {
+		respBody, err := worker.TestChat(workerURL, apiKey)
+		if err != nil {
+			msg := "Worker chat test failed:\n\n" + err.Error()
+			if respBody != "" {
+				msg += "\n\nResponse:\n" + respBody
+			}
+			messageBox(msg, "Z-API Proxy — Test", mbIconError)
+			return
+		}
+		messageBox("Worker chat test successful!\n\n"+
+			"Sent: 1+1=?\n\n"+
+			"Response:\n"+truncateForDisplay(respBody, 300),
+			"Z-API Proxy — Test", mbIconInfo)
+		return
 	}
+
+	// No Worker — test upstream z.ai directly.
+	cfg := settingsState.cfg
+	testURL := strings.TrimSuffix(cfg.Upstream.BaseURL, "/") + "/models"
 
 	client := &http.Client{Timeout: 15 * time.Second}
 	req, err := http.NewRequest("GET", testURL, nil)
@@ -311,19 +325,24 @@ func testConnectionFromSettings() {
 
 	switch {
 	case resp.StatusCode == 200:
-		messageBox("Connection successful.\n\nThe API key is valid and the endpoint is reachable.\n\nTested: "+testURL,
+		messageBox("Connection successful.\n\nThe API key is valid and z.ai is reachable.\n\nTested: "+testURL,
 			"Z-API Proxy — Test", mbIconInfo)
 	case resp.StatusCode == 401 || resp.StatusCode == 403:
 		messageBox("Authentication failed (HTTP "+fmt.Sprintf("%d", resp.StatusCode)+").\n\n"+
-			"The endpoint is reachable but the API key was rejected.\n"+
-			"If testing against a Worker, the key in the Worker's secrets\n"+
-			"may differ from the one entered here.\n\n"+
-			"Tested: "+testURL,
+			"z.ai rejected the API key.\n\nTested: "+testURL,
 			"Z-API Proxy — Test", mbIconWarning)
 	default:
-		messageBox(fmt.Sprintf("Endpoint returned HTTP %d.\n\nTested: %s", resp.StatusCode, testURL),
+		messageBox(fmt.Sprintf("z.ai returned HTTP %d.\n\nTested: %s", resp.StatusCode, testURL),
 			"Z-API Proxy — Test", mbIconWarning)
 	}
+}
+
+// truncateForDisplay limits a string for UI display.
+func truncateForDisplay(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }
 
 // getControlText reads text from a Win32 edit control.

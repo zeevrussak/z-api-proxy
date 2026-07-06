@@ -405,6 +405,39 @@ func HealthCheck(workerURL, apiKey string) error {
 	return nil
 }
 
+// TestChat sends a minimal "1+1=?" chat completion request through the
+// Worker to verify end-to-end functionality: key validation, model
+// rewriting, upstream forwarding, and response handling.
+// Returns the response body or an error with full details.
+func TestChat(workerURL, apiKey string) (string, error) {
+	body := map[string]interface{}{
+		"model":    "z.ai/glm-5.2",
+		"messages": []map[string]string{{"role": "user", "content": "1+1=?"}},
+	}
+	bodyJSON, _ := json.Marshal(body)
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	req, err := http.NewRequest("POST", workerURL+"/v1/chat/completions", bytes.NewReader(bodyJSON))
+	if err != nil {
+		return "", fmt.Errorf("cannot create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("worker unreachable: %w", err)
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != http.StatusOK {
+		return string(respBody), fmt.Errorf("HTTP %d: %s", resp.StatusCode, truncate(string(respBody), 300))
+	}
+
+	return string(respBody), nil
+}
+
 // GetDeployedURL retrieves the current workers.dev URL.
 func GetDeployedURL(cfg *config.Config) (string, error) {
 	client := &http.Client{Timeout: 15 * time.Second}

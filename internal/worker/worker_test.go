@@ -221,8 +221,8 @@ func TestDeploy_SetsBothSecrets(t *testing.T) {
 		t.Fatalf("Deploy failed: %v", err)
 	}
 
-	if len(secretNames) != 2 {
-		t.Fatalf("expected 2 secrets set, got %d: %v", len(secretNames), secretNames)
+	if len(secretNames) != 3 {
+		t.Fatalf("expected 3 secrets set, got %d: %v", len(secretNames), secretNames)
 	}
 
 	hasAPIKey := false

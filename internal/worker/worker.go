@@ -197,6 +197,14 @@ func Deploy(cfg *config.Config) (*DeployResult, error) {
 		}
 	}
 
+	// Set test key for deployment verification.
+	testKey := TestKey
+	if err := setSecret(client, cfg, name, "TEST_KEY", testKey); err != nil {
+		log.Printf("worker: warning — failed to set TEST_KEY secret: %v", err)
+	} else {
+		log.Printf("worker: TEST_KEY secret set")
+	}
+
 	// Enable workers.dev subdomain.
 	subdomainURL := fmt.Sprintf("%s/accounts/%s/workers/scripts/%s/subdomain",
 		apiBaseOverride, cfg.Cloudflare.AccountID, name)
@@ -435,7 +443,10 @@ func GetDeployedURL(cfg *config.Config) (string, error) {
 	return getWorkerURL(client, cfg, workerName(cfg))
 }
 
-// TestDeployedWorker calls the /test endpoint with the built-in test key
+// TestKey is the built-in test key deployed as a Cloudflare secret.
+const TestKey = "testkey_41324124#$!F"
+
+// TestDeployedWorker calls the /test endpoint with the test key
 // to verify the Worker is deployed and responding correctly.
 func TestDeployedWorker(workerURL string) error {
 	client := &http.Client{Timeout: 15 * time.Second}
@@ -443,7 +454,7 @@ func TestDeployedWorker(workerURL string) error {
 	if err != nil {
 		return fmt.Errorf("cannot create request: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer testkey_41324124#$!F")
+	req.Header.Set("Authorization", "Bearer "+TestKey)
 
 	resp, err := client.Do(req)
 	if err != nil {

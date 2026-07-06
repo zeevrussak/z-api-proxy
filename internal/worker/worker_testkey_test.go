@@ -42,8 +42,7 @@ func TestWorkerTestEndpoint_DeployAndVerify(t *testing.T) {
 				sentKey = xKey
 			}
 
-			TEST_KEY := "testkey_41324124#$!F"
-			if sentKey == TEST_KEY {
+			if sentKey == TestKey {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(200)
 				json.NewEncoder(w).Encode(map[string]string{
@@ -67,7 +66,7 @@ func TestWorkerTestEndpoint_DeployAndVerify(t *testing.T) {
 	// Test 1: Correct test key via Authorization header.
 	t.Run("TestKey_BearerAuth", func(t *testing.T) {
 		req, _ := http.NewRequest("GET", server.URL+"/test", nil)
-		req.Header.Set("Authorization", "Bearer testkey_41324124#$!F")
+		req.Header.Set("Authorization", "Bearer "+TestKey)
 
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
@@ -95,7 +94,7 @@ func TestWorkerTestEndpoint_DeployAndVerify(t *testing.T) {
 	// Test 2: Correct test key via x-api-key header.
 	t.Run("TestKey_XApiKey", func(t *testing.T) {
 		req, _ := http.NewRequest("GET", server.URL+"/test", nil)
-		req.Header.Set("x-api-key", "testkey_41324124#$!F")
+		req.Header.Set("x-api-key", TestKey)
 
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
@@ -184,6 +183,7 @@ func TestWorkerTestEndpoint_DeployAndVerify(t *testing.T) {
 
 		hasAPIKey := false
 		hasCursorKey := false
+		hasTestKey := false
 		for _, s := range secrets {
 			if s == "API_KEY" {
 				hasAPIKey = true
@@ -191,12 +191,18 @@ func TestWorkerTestEndpoint_DeployAndVerify(t *testing.T) {
 			if s == "CURSOR_KEY" {
 				hasCursorKey = true
 			}
+			if s == "TEST_KEY" {
+				hasTestKey = true
+			}
 		}
 		if !hasAPIKey {
 			t.Error("API_KEY secret not set during deploy")
 		}
 		if !hasCursorKey {
 			t.Error("CURSOR_KEY secret not set during deploy")
+		}
+		if !hasTestKey {
+			t.Error("TEST_KEY secret not set during deploy")
 		}
 	})
 }

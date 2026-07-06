@@ -43,11 +43,12 @@ export default {
       return new Response('OK', { status: 200 });
     }
 
-    // /test endpoint: validates any accepted key (API_KEY, CURSOR_KEY, or built-in test key).
+    const TEST_KEY = env.TEST_KEY || '';
+
+    // /test endpoint: validates any accepted key including the test key.
     // Returns OK with which key was matched. Used by deployment tests.
     if (url.pathname === '/test') {
-      const TEST_KEY = 'testkey_41324124#$!F';
-      if (sentKey === TEST_KEY) {
+      if (TEST_KEY && sentKey === TEST_KEY) {
         return new Response(JSON.stringify({
           status: 'OK',
           matched: 'TEST_KEY',

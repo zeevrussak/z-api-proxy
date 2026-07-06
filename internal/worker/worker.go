@@ -149,8 +149,13 @@ export default {
           object: 'model',
           created: 1700000000,
           owned_by: 'z.ai',
+          // Include all field name aliases Cursor might read.
           context_length: spec.ctx,
-          max_tokens: spec.maxOut
+          max_context_length: spec.ctx,
+          context_window: spec.ctx,
+          max_input_tokens: spec.ctx,
+          max_tokens: spec.maxOut,
+          max_output_tokens: spec.maxOut
         });
       }
       const resp = { object: 'list', data: models };

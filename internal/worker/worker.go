@@ -286,7 +286,6 @@ func Deploy(cfg *config.Config) (*DeployResult, error) {
 	metadata := map[string]interface{}{
 		"main_module":        "worker.js",
 		"compatibility_date": "2024-09-23",
-		"logpush":            true,
 		"observability": map[string]bool{
 			"enabled": true,
 		},

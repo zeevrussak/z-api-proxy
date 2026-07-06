@@ -101,8 +101,15 @@ export default {
 
     // Log every request for debugging (visible in Cloudflare dashboard → Workers → Logs).
     const authHeader = request.headers.get('Authorization') || '';
-    const authPrefix = authHeader.substring(0, 20);
-    console.log('[z-api-proxy] ' + request.method + ' ' + url.pathname + ' | auth=' + (authPrefix ? authPrefix + '...' : 'NONE'));
+    const sentKey = authHeader.replace('Bearer ', '');
+    const sentPrefix = sentKey.substring(0, 12);
+
+    // Show which keys are configured (first 8 chars only for security).
+    const keyHints = acceptedKeys.filter(k => k).map(k => k.substring(0, 8) + '...');
+    console.log('[z-api-proxy] ' + request.method + ' ' + url.pathname);
+    console.log('[z-api-proxy]   received key: ' + (sentPrefix ? sentPrefix + '...' : 'NONE'));
+    console.log('[z-api-proxy]   accepted keys: [' + keyHints.join(', ') + ']');
+    console.log('[z-api-proxy]   CURSOR_KEY set: ' + (CURSOR_KEY ? 'yes' : 'no'));
 
     if (url.pathname === '/health') {
       if (API_KEY && !acceptedKeys.some(k => k && authHeader === 'Bearer ' + k)) {

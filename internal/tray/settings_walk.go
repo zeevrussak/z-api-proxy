@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/lxn/walk"
 	. "github.com/lxn/walk/declarative"
@@ -19,6 +20,16 @@ import (
 	"z-api-proxy/internal/config"
 	"z-api-proxy/internal/worker"
 )
+
+// ShowSettingsForTest opens the settings dialog for automated testing.
+// It auto-closes after 3 seconds.
+func ShowSettingsForTest(cfg *config.Config, configPath string) {
+	go func() {
+		time.Sleep(3 * time.Second)
+		walk.App().Exit(0)
+	}()
+	showSettingsDialogWalk(cfg, configPath)
+}
 
 // showSettingsDialogWalk creates the settings dialog using lxn/walk.
 func showSettingsDialogWalk(cfg *config.Config, configPath string) {

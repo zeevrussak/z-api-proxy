@@ -16,6 +16,7 @@ package main
 import (
 	"context"
 	_ "embed"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -39,6 +40,11 @@ var iconNormal []byte
 var iconError []byte
 
 func main() {
+	// --test-ui flag: launch settings window and close after 2s.
+	if len(os.Args) > 1 && os.Args[1] == "--test-ui" {
+		os.Exit(testUISettings())
+	}
+
 	logPath := filepath.Join(config.AppConfigDir(), "proxy.log")
 	logFile, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 	if err == nil {
@@ -78,4 +84,44 @@ func main() {
 	defer cancel()
 	server.Shutdown(ctx)
 	log.Println("=== z-api-proxy stopped ===")
+}
+
+// testUISettings opens the settings dialog, waits 2 seconds, then closes it.
+// Returns 0 on success, 1 on failure. Used by the --test-ui CLI flag
+// and by the automated UI test.
+func testUISettings() int {
+	configPath := config.DefaultConfigPath()
+	manager, err := config.NewManager(configPath)
+	if err != nil {
+		log.Printf("config error: %v", err)
+		return 1
+	}
+	cfg := manager.Get()
+
+	// Launch settings in a goroutine. The dialog blocks its own thread.
+	opened := make(chan bool, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				errCh <- fmt.Errorf("settings dialog panicked: %v", r)
+			}
+		}()
+		opened <- true // signal that we started without panicking
+		tray.ShowSettingsForTest(cfg, configPath)
+	}()
+
+	select {
+	case <-opened:
+		// Dialog launched. Wait 2s then signal success.
+		time.Sleep(2 * time.Second)
+		log.Println("UI test: settings window opened successfully")
+		return 0
+	case err := <-errCh:
+		log.Printf("UI test FAILED: %v", err)
+		return 1
+	case <-time.After(10 * time.Second):
+		log.Println("UI test FAILED: timeout waiting for dialog")
+		return 1
+	}
 }

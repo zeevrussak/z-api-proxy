@@ -96,6 +96,7 @@ type CloudflareConfig struct {
 	APIToken        string `toml:"-"` // injected from secrets.toml
 	WorkerName      string `toml:"worker_name"`
 	WorkerHostname  string `toml:"worker_hostname"`
+	EnableLogging   bool   `toml:"enable_logging"`
 }
 
 // ModelMapping defines a single bidirectional model-names translation.

@@ -716,25 +716,25 @@ func showSettingsDialog(cfg *config.Config, configPath string, iconBytes []byte)
 	// ── Upstream section ──
 	yPos += gap
 	createSection("Upstream", &yPos)
+	// Test Connection button — next to the "Upstream" section header
+	testConnLabel, _ := syscall.UTF16PtrFromString("Test Connection")
+	hwndTestConn, _, _ := pCreateWindowExW.Call(
+		0, uintptr(unsafe.Pointer(btnClass)), uintptr(unsafe.Pointer(testConnLabel)),
+		uintptr(wsChild|wsVisible|wsTabstop),
+		uintptr(mx+lw+gap+fw-110), uintptr(yPos-ch-gap), 110, ch,
+		hwnd, idTestConn, 0, 0,
+	)
+	pSendMessageW.Call(hwndTestConn, wmSetFont, fontHandle, 1)
+	allChildren = append(allChildren, hwndTestConn)
 	createLabel("Base URL:", mx, yPos, lw, ch)
 	hwndBaseURL := createEdit(idBaseURLEd, cfg.Upstream.BaseURL, mx+lw+gap, yPos, fw, ch, false)
 	addLayout(hwndBaseURL, lfStretch)
 	yPos += ch + gap
 	createLabel("API Key:", mx, yPos, lw, ch)
-	hwndAPIKey := createEdit(idAPIKeyEd, cfg.Upstream.APIKey, mx+lw+gap, yPos, fw-110, ch, true)
+	hwndAPIKey := createEdit(idAPIKeyEd, cfg.Upstream.APIKey, mx+lw+gap, yPos, fw, ch, true)
 	addLayout(hwndAPIKey, lfStretch)
-	// Test Connection button
-	testConnLabel, _ := syscall.UTF16PtrFromString("Test Connection")
-	hwndTestConn, _, _ := pCreateWindowExW.Call(
-		0, uintptr(unsafe.Pointer(btnClass)), uintptr(unsafe.Pointer(testConnLabel)),
-		uintptr(wsChild|wsVisible|wsTabstop),
-		uintptr(mx+lw+gap+fw-100), uintptr(yPos), 100, ch,
-		hwnd, idTestConn, 0, 0,
-	)
-	pSendMessageW.Call(hwndTestConn, wmSetFont, fontHandle, 1)
-	allChildren = append(allChildren, hwndTestConn)
 	yPos += ch + gap
-	createLabel("Gateway Worker Key:", mx, yPos, lw, ch)
+	createLabel("Gateway Key:", mx, yPos, lw, ch)
 	hwndCursorKey := createEdit(idCursorKeyEd, cfg.Proxy.CursorKey, mx+lw+gap, yPos, fw, ch, true)
 	addLayout(hwndCursorKey, lfStretch)
 	yPos += ch + gap

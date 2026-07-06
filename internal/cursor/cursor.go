@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 )
 
@@ -35,6 +36,27 @@ func IsInstalled() bool {
 	return SettingsPath() != ""
 }
 
+// IsRunning reports whether the Cursor process is currently running.
+// Writing settings.json while Cursor is running causes Cursor to
+// overwrite the file on exit with its in-memory state.
+func IsRunning() bool {
+	cmd := exec.Command("tasklist", "/FI", "IMAGENAME eq Cursor.exe", "/NH")
+	out, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	return len(out) > 0 && contains(string(out), "Cursor.exe")
+}
+
+func contains(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}
+
 // RegisterModels writes the proxy base URL and model names into Cursor's
 // settings.json using the OpenAI API override (the only one Cursor supports).
 // cursorKey is the Gateway Worker Key that Cursor will send.
@@ -43,6 +65,10 @@ func RegisterModels(proxyURL string, modelNames []string, cursorKey string) (str
 	settingsPath := SettingsPath()
 	if settingsPath == "" {
 		return "", fmt.Errorf("Cursor installation not found (expected %%APPDATA%%\\Cursor\\User\\settings.json)")
+	}
+
+	if IsRunning() {
+		return "", fmt.Errorf("Cursor is currently running. Please close Cursor completely before configuring settings — otherwise Cursor will overwrite the changes on exit.")
 	}
 
 	raw, err := os.ReadFile(settingsPath)

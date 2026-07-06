@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -51,6 +52,17 @@ func main() {
 		return
 	}
 	fmt.Println("Cursor settings found: " + settingsPath)
+
+	// Check if Cursor is running.
+	if cursorRunning() {
+		fmt.Println()
+		fmt.Println("ERROR: Cursor is currently running!")
+		fmt.Println("       Please close Cursor completely before running this tool.")
+		fmt.Println("       Cursor will overwrite settings.json on exit if it's running.")
+		waitExit(reader)
+		return
+	}
+	fmt.Println("Cursor is not running — OK.")
 	fmt.Println()
 
 	// Prompt for Worker URL.
@@ -127,6 +139,16 @@ func findCursorSettings() string {
 		return ""
 	}
 	return p
+}
+
+// cursorRunning checks if Cursor.exe is running.
+func cursorRunning() bool {
+	cmd := exec.Command("tasklist", "/FI", "IMAGENAME eq Cursor.exe", "/NH")
+	out, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	return len(out) > 0 && strings.Contains(string(out), "Cursor.exe")
 }
 
 // maskKey shows first 8 and last 4 chars of a key.

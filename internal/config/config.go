@@ -33,6 +33,7 @@ import (
 type Config struct {
 	Server     ServerConfig     `toml:"server"`
 	Upstream   UpstreamConfig   `toml:"upstream"`
+	Proxy      ProxyConfig      `toml:"proxy"`
 	Tunnel     TunnelConfig     `toml:"tunnel"`
 	Security   SecurityConfig   `toml:"security"`
 	Cloudflare CloudflareConfig `toml:"cloudflare"`
@@ -45,6 +46,9 @@ type secretsFile struct {
 	Upstream struct {
 		APIKey string `toml:"api_key"`
 	} `toml:"upstream"`
+	Proxy struct {
+		CursorKey string `toml:"cursor_key"`
+	} `toml:"proxy"`
 	Tunnel struct {
 		Token string `toml:"token"`
 	} `toml:"tunnel"`
@@ -59,10 +63,17 @@ type ServerConfig struct {
 }
 
 // UpstreamConfig holds the destination API settings.
-// APIKey is populated from secrets.toml, not config.toml.
+// APIKey is populated from secrets.toml.
 type UpstreamConfig struct {
 	BaseURL string `toml:"base_url"`
 	APIKey  string `toml:"-"` // injected from secrets.toml
+}
+
+// ProxyConfig holds the cursor-to-worker key. The Worker validates
+// this key, then swaps it for the real upstream key.
+// CursorKey is populated from secrets.toml.
+type ProxyConfig struct {
+	CursorKey string `toml:"-"` // injected from secrets.toml
 }
 
 // TunnelConfig holds optional Cloudflare Named Tunnel settings.
@@ -135,6 +146,7 @@ func loadSecrets(path string) (*secretsFile, error) {
 // mergeSecrets injects secrets.toml values into a Config.
 func mergeSecrets(cfg *Config, sec *secretsFile) {
 	cfg.Upstream.APIKey = sec.Upstream.APIKey
+	cfg.Proxy.CursorKey = sec.Proxy.CursorKey
 	cfg.Tunnel.Token = sec.Tunnel.Token
 	cfg.Cloudflare.APIToken = sec.Cloudflare.APIToken
 }
@@ -266,12 +278,15 @@ func CreateDefaultSecrets(path string) error {
 
 # z.ai API key. Leave empty to pass through from Cursor.
 [upstream]
+# z.ai API key — forwarded to z.ai by the Worker. Never exposed to Cursor.
 api_key = ""
 
 # Cloudflare Named Tunnel token (from Zero Trust dashboard).
 # Only needed when [tunnel].mode = "named" in config.toml.
-[tunnel]
-token = ""
+[proxy]
+# Key that Cursor sends to the Worker. Can be any random string.
+# The Worker validates this, then swaps it for the real upstream key.
+cursor_key = ""
 
 # Cloudflare API token for Worker deployment.
 # Create at dash.cloudflare.com/profile/api-tokens

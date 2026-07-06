@@ -91,6 +91,7 @@ const (
 	idCancel       = 2016
 	idWorkerURLEd  = 2017
 	idWorkerHostEd = 2019
+	idCursorKeyEd  = 2020
 	idTestConn     = 2018
 )
 
@@ -128,6 +129,7 @@ type settingsDialogState struct {
 	hwndWorkerName uintptr
 	hwndWorkerURL    uintptr
 	hwndWorkerHost   uintptr
+	hwndCursorKey    uintptr
 	hwndTestConn     uintptr
 	hwndModels     uintptr
 	hwndSave       uintptr
@@ -499,6 +501,9 @@ func saveSettings(hwnd uintptr) {
 			Token:    getControlText(s.hwndToken),
 			Hostname: getControlText(s.hwndHostname),
 		},
+		Proxy: config.ProxyConfig{
+			CursorKey: getControlText(s.hwndCursorKey),
+		},
 		Cloudflare: config.CloudflareConfig{
 			AccountID:      getControlText(s.hwndAcctID),
 			APIToken:       getControlText(s.hwndAPIToken),
@@ -545,6 +550,9 @@ func saveSettings(hwnd uintptr) {
 		Upstream struct {
 			APIKey string `toml:"api_key"`
 		} `toml:"upstream"`
+		Proxy struct {
+			CursorKey string `toml:"cursor_key"`
+		} `toml:"proxy"`
 		Tunnel struct {
 			Token string `toml:"token"`
 		} `toml:"tunnel"`
@@ -552,7 +560,9 @@ func saveSettings(hwnd uintptr) {
 			APIToken string `toml:"api_token"`
 		} `toml:"cloudflare"`
 	}{}
+	cursorKey := getControlText(s.hwndCursorKey)
 	sec.Upstream.APIKey = apiKey
+	sec.Proxy.CursorKey = cursorKey
 	sec.Tunnel.Token = tunnelToken
 	sec.Cloudflare.APIToken = cloudflareToken
 
@@ -716,6 +726,10 @@ func showSettingsDialog(cfg *config.Config, configPath string, iconBytes []byte)
 	)
 	pSendMessageW.Call(hwndTestConn, wmSetFont, fontHandle, 1)
 	yPos += ch + gap
+	createLabel("Cursor Key:", mx, yPos, lw, ch)
+	hwndCursorKey := createEdit(idCursorKeyEd, cfg.Proxy.CursorKey, mx+lw+gap, yPos, fw, ch, true)
+	addLayout(hwndCursorKey, lfStretch)
+	yPos += ch + gap
 
 	// ── Security section ──
 	yPos += gap
@@ -869,6 +883,7 @@ func showSettingsDialog(cfg *config.Config, configPath string, iconBytes []byte)
 	settingsState.hwndWorkerName = hwndWorkerName
 	settingsState.hwndWorkerURL = hwndWorkerURL
 	settingsState.hwndWorkerHost = hwndWorkerHostname
+	settingsState.hwndCursorKey = hwndCursorKey
 	settingsState.hwndTestConn = hwndTestConn
 	settingsState.hwndModels = hwndModels
 	settingsState.hwndSave = hwndSave

@@ -92,10 +92,16 @@ const HOP_HEADERS = new Set([
 export default {
   async fetch(request, env) {
     const API_KEY = env.API_KEY || '';
+    const CURSOR_KEY = env.CURSOR_KEY || '';
     const url = new URL(request.url);
 
+    // Build list of accepted keys: real upstream key + optional cursor proxy key.
+    const acceptedKeys = [API_KEY];
+    if (CURSOR_KEY) acceptedKeys.push(CURSOR_KEY);
+
     if (url.pathname === '/health') {
-      if (API_KEY && request.headers.get('Authorization') !== 'Bearer ' + API_KEY) {
+      const auth = request.headers.get('Authorization') || '';
+      if (API_KEY && !acceptedKeys.some(k => k && auth === 'Bearer ' + k)) {
         return new Response('unauthorized', { status: 401 });
       }
       return new Response('OK', { status: 200 });
@@ -124,12 +130,13 @@ export default {
 
     if (API_KEY) {
       const auth = request.headers.get('Authorization') || '';
-      if (auth !== 'Bearer ' + API_KEY) {
-        return new Response('unauthorized: API key mismatch', { status: 401 });
+      if (!acceptedKeys.some(k => k && auth === 'Bearer ' + k)) {
+        return new Response('unauthorized: invalid API key', { status: 401 });
       }
+      // Always forward with the real upstream key.
       init.headers['Authorization'] = 'Bearer ' + API_KEY;
     } else {
-      return new Response('unauthorized: no API key configured', { status: 401 });
+      return new Response('unauthorized: no upstream API key configured', { status: 401 });
     }
 
     const upstreamReq = new Request(upstreamUrl, init);
@@ -272,12 +279,21 @@ func Deploy(cfg *config.Config) (*DeployResult, error) {
 
 	log.Printf("worker: script uploaded successfully")
 
-	// Set API key as secret via Secrets API.
+	// Set API key (real upstream key forwarded to z.ai).
 	if cfg.Upstream.APIKey != "" {
 		if err := setSecret(client, cfg, name, "API_KEY", cfg.Upstream.APIKey); err != nil {
 			log.Printf("worker: warning — failed to set API_KEY secret: %v", err)
 		} else {
 			log.Printf("worker: API_KEY secret set")
+		}
+	}
+
+	// Set cursor proxy key (what Cursor sends — swapped for real key on upstream).
+	if cfg.Proxy.CursorKey != "" {
+		if err := setSecret(client, cfg, name, "CURSOR_KEY", cfg.Proxy.CursorKey); err != nil {
+			log.Printf("worker: warning — failed to set CURSOR_KEY secret: %v", err)
+		} else {
+			log.Printf("worker: CURSOR_KEY secret set")
 		}
 	}
 

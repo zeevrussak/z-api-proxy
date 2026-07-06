@@ -36,11 +36,10 @@ func IsInstalled() bool {
 }
 
 // RegisterModels writes the proxy base URL and model names into Cursor's
-// settings.json. It reads the existing settings, preserves all keys,
-// and adds/updates only the proxy-related ones.
-//
-// Returns the path to settings.json and nil on success.
-func RegisterModels(proxyURL string, modelNames []string) (string, error) {
+// settings.json. When cursorKey is non-empty, it's the proxy access token
+// that Cursor sends (not the real z.ai key). Returns the path to
+// settings.json and nil on success.
+func RegisterModels(proxyURL string, modelNames []string, cursorKey string) (string, error) {
 	settingsPath := SettingsPath()
 	if settingsPath == "" {
 		return "", fmt.Errorf("Cursor installation not found (expected %%APPDATA%%\\Cursor\\User\\settings.json)")

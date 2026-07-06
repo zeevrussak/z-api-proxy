@@ -542,7 +542,7 @@ func (t *trayApp) registerModels() {
 		modelNames = append(modelNames, m.From)
 	}
 
-	settingsPath, err := cursorint.RegisterModels(proxyURL, modelNames)
+	settingsPath, err := cursorint.RegisterModels(proxyURL, modelNames, cfg.Proxy.CursorKey)
 	if err != nil {
 		log.Printf("register models error: %v", err)
 		messageBox("Failed to register models in Cursor:\n\n"+err.Error(),

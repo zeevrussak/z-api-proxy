@@ -78,6 +78,16 @@ if %ERRORLEVEL% neq 0 (
 )
 echo       cursor-setup-helper.exe
 
+:: --- Build cursor-check ---
+echo.
+echo [2.6/6] Building cursor-check...
+go build -ldflags "-X main.version=%VERSION%" -o releases\cursor-check.exe ./cmd/cursor-check/
+if %ERRORLEVEL% neq 0 (
+    echo FAILED: cursor-check build
+    exit /b 1
+)
+echo       cursor-check.exe
+
 :: --- Build MSIs ---
 echo.
 echo [3/5] Building MSI installers...

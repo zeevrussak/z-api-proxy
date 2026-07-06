@@ -4,29 +4,33 @@
 [![Platform: Windows](https://img.shields.io/badge/Platform-Windows%20x64%20%7C%20ARM64-blue)](#)
 [![Go Version](https://img.shields.io/badge/Go-1.25%2B-00ADD8)](#)
 
-**A Windows system-tray reverse proxy for using [z.ai](https://z.ai) GLM models (GLM-4.6, GLM-5.2) with [Cursor](https://cursor.com) — with built-in public tunnel, auto-update, and one-click setup.**
+**A Windows system-tray reverse proxy for using [z.ai](https://z.ai) GLM models (GLM-4.5, GLM-4.6, GLM-5.2) with [Cursor](https://cursor.com) — with Cloudflare Worker deployment, public tunnel, dual API support (OpenAI + Anthropic), and one-click Cursor setup.**
 
 Cursor sends model names like `z.ai/glm-5.2`, but the z.ai API expects `glm-5.2`. This proxy transparently rewrites model names in both directions — requests and responses, including SSE streams — so Cursor and z.ai can talk to each other without any configuration hacks.
 
 ## Why You Need This
 
-Cursor's cloud servers block requests to `localhost` / `127.0.0.1` ("Access to private networks is forbidden"). z-api-proxy solves this two ways:
+Cursor's cloud servers block requests to `localhost` / `127.0.0.1` ("Access to private networks is forbidden"). z-api-proxy solves this three ways:
 
-1. **Public Tunnel (built-in)** — One click in the tray creates a public HTTPS URL via Cloudflare Quick Tunnel. No account needed.
-2. **Direct pass-through** — When using a custom API key, Cursor sends requests directly from your machine, bypassing its cloud servers entirely.
+1. **Cloudflare Worker (recommended)** — Deploy a stable, permanent edge proxy to your Cloudflare account. No local process needed.
+2. **Public Tunnel (built-in)** — One click creates a public HTTPS URL via Cloudflare Quick Tunnel. No account needed.
+3. **Named Tunnel** — Stable URL using your own domain via Cloudflare Zero Trust API.
 
 ## Features
 
 - **Bidirectional model rewriting** — request and response bodies, including SSE streams
-- **Built-in public tunnel** — one-click Cloudflare Quick Tunnel (no account, no signup)
+- **Dual API support** — OpenAI (`/v1/chat/completions`) and Anthropic (`/v1/messages`) simultaneously
+- **Cloudflare Worker deployment** — stable `*.workers.dev` URL or custom domain, no local process needed
+- **Gateway Key isolation** — Cursor sends a throwaway key, Worker swaps it for the real z.ai key
+- **Per-model context windows** — `/v1/models` returns accurate specs (1M for GLM-5.2, 200K for GLM-4.6)
+- **Worker request logging** — Cloudflare dashboard logs for debugging (optional)
 - **Auto-update** — checks GitHub for new releases on startup, one-click install
 - **Hot-reloadable config** — edit settings without restarting (picked up within 5 seconds)
-- **Native ARM64 + x64** — runs natively on both Windows architectures, no emulation
+- **Native ARM64 + x64** — runs natively on both Windows architectures
+- **Native Windows UI** — settings dialog built with lxn/walk (proper DPI scaling, layout, theming)
 - **MSI + NSIS installers** — per-architecture MSI packages and a combined auto-detecting installer
-- **Start with Windows** — optional autostart toggle in the tray menu (on by default)
-- **Copy Base URL** — one-click clipboard copy of the proxy URL for Cursor settings
-- **Connection testing** — built-in upstream reachability check
-- **Live status** — tray icon and tooltip show handled/rejected counts and error state
+- **Start with Windows** — optional autostart toggle (on by default)
+- **Contact Developer** — built-in feedback via email
 
 ## Quick Start
 
@@ -34,193 +38,192 @@ Cursor's cloud servers block requests to `localhost` / `127.0.0.1` ("Access to p
 
 1. Download the latest installer from [Releases](https://github.com/zeevrussak/z-api-proxy/releases):
    - **`z-api-proxy-win-*-amd64.msi`** for x64 Windows
-   - **`z-api-proxy-win-*-arm64.msi`** for ARM64 Windows (Surface Pro X, Snapdragon laptops)
+   - **`z-api-proxy-win-*-arm64.msi`** for ARM64 Windows
    - **`z-api-proxy-win-*-setup.exe`** — combined installer (auto-detects architecture)
 2. Run the installer — the proxy starts automatically and appears in your system tray
 
-### Configure Cursor
+### Option A: Cloudflare Worker (recommended — stable URL)
 
-1. Start z-api-proxy (system tray icon)
-2. **Right-click the tray icon → "Start Public Tunnel"**
-3. Wait a few seconds — a dialog shows your public URL (e.g. `https://random.trycloudflare.com`)
-4. In Cursor: **Settings → Models**
-   - Set **OpenAI API Key** to your z.ai API key
-   - Enable **Override OpenAI Base URL**
-   - Set URL to **`https://random.trycloudflare.com/v1`** (the tunnel URL + `/v1`)
-5. Set the model name to `z.ai/glm-5.2` or `z.ai/glm-4.6` (matching your config)
+1. Right-click tray → **Settings...**
+2. Under **Upstream**: enter your z.ai API Key and a Gateway Key (any password Cursor will send)
+3. Under **Cloudflare Worker**: enter Account ID and API Token
+4. Click **Save**, then right-click → **Deploy Cloudflare Worker**
+5. Right-click → **Register Models in Cursor** (select OpenAI, Anthropic, or Both)
+6. Restart Cursor
 
-> **Alternative (no tunnel):** If you use a custom API key in Cursor, requests go directly from your machine. Set the base URL to `http://127.0.0.1:8787/v1` directly. Use **Copy Base URL** in the tray for one-click clipboard copy.
+### Option B: Quick Tunnel (no account needed)
+
+1. Right-click tray → **Start Public Tunnel**
+2. Wait for the public URL dialog
+3. Right-click → **Register Models in Cursor**
+4. Restart Cursor
+
+### Option C: Named Tunnel (your own domain)
+
+1. Right-click tray → **Settings...** → Tunnel section → select **Named**
+2. Enter your hostname (e.g. `proxy.yourdomain.com`)
+3. Right-click → **Create Named Tunnel** (auto-creates tunnel + DNS via API)
+4. Register in Cursor and restart
 
 ## Configuration
 
-On first launch, a default config is created at:
+Settings are split across two files for security:
 
-```
-%APPDATA%\Z-API-Proxy\config.toml
-```
+| File | Contents | Permissions |
+|------|----------|-------------|
+| `%APPDATA%\Z-API-Proxy\config.toml` | Server, upstream URL, model mappings, tunnel mode, Cloudflare account ID, worker settings | `0600` |
+| `%APPDATA%\Z-API-Proxy\secrets.toml` | API keys, gateway keys, tunnel tokens, Cloudflare API tokens | `0600` |
 
-Edit it via the tray menu (**right-click → Configure...**) or manually. Changes are picked up automatically within ~5 seconds — no restart needed.
+Both files hot-reload within 5 seconds. Edit via **Settings...** dialog or manually.
 
 ```toml
+# config.toml (non-sensitive settings)
+
 [server]
-# Local listen address
 listen = "127.0.0.1:8787"
 
 [upstream]
-# z.ai API base URL
-base_url = "https://api.z.ai/api/paas/v4"
+base_url = "https://api.z.ai/api/coding/paas/v4"
 
-# API key for z.ai. Leave empty to pass through from Cursor.
-api_key = ""
+[tunnel]
+mode = "quick"          # "quick" or "named"
+hostname = ""           # for named mode
 
-# Model name mappings.
-# "from" = model name as sent by Cursor
-# "to"   = model name as expected by z.ai upstream
+[security]
+verify_key = true       # always on
+
+[cloudflare]
+account_id = ""
+worker_name = "z-api-proxy"
+worker_hostname = ""    # custom domain (optional)
+enable_logging = false  # Worker console.log in dashboard
+
+# All 14 z.ai models pre-configured
 [[models]]
 from = "z.ai/glm-5.2"
 to = "glm-5.2"
+# ... (glm-5.1, glm-5, glm-5-turbo, glm-5v-turbo, glm-4.7, etc.)
+```
 
-[[models]]
-from = "z.ai/glm-4.6"
-to = "glm-4.6"
+```toml
+# secrets.toml (sensitive — keep private!)
+
+[upstream]
+api_key = ""              # real z.ai API key
+
+[proxy]
+cursor_key = ""           # gateway key Cursor sends (any password)
+
+[tunnel]
+token = ""                # Cloudflare tunnel token (named mode)
+
+[cloudflare]
+api_token = ""            # Cloudflare API token for Worker deploy
 ```
 
 ## Tray Menu
 
 | Item | Description |
 |------|-------------|
-| **Configure...** | Opens `config.toml` in Notepad for editing |
-| **Test Connection** | Pings the upstream `/models` endpoint and reports status |
-| **Copy Base URL** | Copies the active URL for Cursor — local `http://127.0.0.1:8787/v1` or public tunnel URL (auto-switches when tunnel is running) |
-| **Start Public Tunnel** | Creates a public HTTPS URL via Cloudflare Quick Tunnel. Auto-starts on next launch when enabled |
-| **Contact Developer** | Opens your mail client to send feedback |
+| **Settings...** | Opens native settings dialog (walk-based, DPI-aware) |
+| **Edit Config (Raw)** | Opens `config.toml` in Notepad |
+| **Test Connection** | Pings upstream or sends test chat through Worker |
+| **Copy Base URL** | Copies active URL (Worker > Tunnel > Local) with `/v1` |
+| **Start Public Tunnel** | Cloudflare Quick Tunnel or Named Tunnel |
+| **Deploy Cloudflare Worker** | Deploys/stable Worker to your Cloudflare account |
+| **Create Named Tunnel** | Auto-creates tunnel + DNS via Cloudflare API |
+| **Register Models in Cursor** | Writes settings to Cursor (OpenAI/Anthropic/Both selection) |
 | **Start with Windows** | Toggle autostart at login (on by default) |
-| **Update Available!** | Shows when a new release exists — click to download and install |
+| **Update Available!** | Shows when a new release exists |
+| **Contact Developer** | Opens mail client |
 | **Exit** | Quit the proxy |
-
-The tray icon turns red when the proxy encounters upstream errors, and the tooltip shows live handled/rejected request counts.
 
 ## How It Works
 
-```
-Cursor  ──HTTPS──>  Cloudflare Tunnel  ──>  z-api-proxy (127.0.0.1:8787)  ──HTTPS──>  z.ai API
-                    (public URL)             rewrites z.ai/glm-5.2 → glm-5.2         (api.z.ai)
-                                             rewrites glm-5.2 → z.ai/glm-5.2
-```
-
-- Rewrites the `"model"` field in request bodies before forwarding upstream
-- Rewrites the `"model"` and `"id"` fields in response bodies (both regular JSON and SSE streams) on the way back
-- Unmapped model names pass through unchanged
-- If `api_key` is set in config, it overrides the `Authorization` header; otherwise Cursor's key is passed through
-
-### Public Tunnel Details
-
-The tunnel uses [cloudflared](https://github.com/cloudflare/cloudflared) (Apache 2.0 license). On first use, the proxy downloads `cloudflared.exe` (~50 MB) to `%APPDATA%\Z-API-Proxy\` and caches it.
-
-**Two tunnel modes:**
-
-| Mode | URL | Account | Setup |
-|------|-----|---------|-------|
-| **Quick** (default) | Random `*.trycloudflare.com` | None | One click |
-| **Named** | Your stable hostname (e.g. `proxy.example.com`) | Cloudflare Zero Trust | Paste tunnel token in config |
-
-**Quick Tunnel** URLs are ephemeral — they change on each restart. For a stable URL:
-
-1. Create a Cloudflare account and go to **Zero Trust → Networks → Tunnels**
-2. Create a tunnel and copy the **token**
-3. Set up a public hostname (e.g. `proxy.yourdomain.com`) pointing to `http://localhost:8787`
-4. In `config.toml`:
-   ```toml
-   [tunnel]
-   mode = "named"
-   token = "eyJh..."  # from Zero Trust dashboard
-   hostname = "https://proxy.yourdomain.com"
-   ```
-
-**Auto-start:** Once you enable the tunnel via the tray menu, it automatically starts on every app launch. The preference is stored in `%APPDATA%\Z-API-Proxy\tunnel.pref`.
-
-### Cloudflare Worker Setup (Stable URL, No Tunnel Needed)
-
-The tunnel is great for quick use, but a **Cloudflare Worker** gives you a permanent URL that never changes and requires nothing running on your machine except the proxy. The Worker runs on Cloudflare's edge network and forwards to z.ai directly.
-
-#### Step 1: Get your Cloudflare credentials
-
-1. **Account ID**: Go to [dash.cloudflare.com](https://dash.cloudflare.com) → log in → your Account ID is displayed on the right sidebar of any domain's overview page. Copy it.
-
-2. **API Token**: Go to [dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens) → **Create Token** → use the **"Edit Cloudflare Workers"** template → **Continue to summary** → **Create Token**. Copy the token (shown only once).
-
-#### Step 2: Add credentials to your config
-
-Open **Settings...** from the tray menu (or edit `%APPDATA%\Z-API-Proxy\secrets.toml` manually):
-
-```toml
-# secrets.toml
-[cloudflare]
-api_token = "your-api-token-here"
-```
-
-And in `config.toml`:
-
-```toml
-# config.toml
-[cloudflare]
-account_id = "your-account-id-here"
-worker_name = "z-api-proxy"
-```
-
-#### Step 3: Deploy
-
-Click **Deploy Cloudflare Worker** in the tray menu. The proxy generates a JavaScript Worker script with the same model-rewriting logic and deploys it to your account. You'll get a stable URL like:
+### Cloudflare Worker (recommended)
 
 ```
-https://z-api-proxy.your-subdomain.workers.dev/v1
+Cursor  ──HTTPS──>  Cloudflare Worker  ──HTTPS──>  z.ai API
+                    (stable URL)        validates key → swaps for real key
+                    rewrites model names                (api.z.ai)
+                    per-model context windows
 ```
 
-#### Step 4: Use in Cursor
+The Worker JS source is at [`internal/worker/worker.js`](internal/worker/worker.js) — a static file that reads all config from Cloudflare environment variables.
 
-Set this URL as your **OpenAI API Base URL** in Cursor. The Worker runs on Cloudflare's edge network and forwards directly to z.ai — no local proxy or tunnel needed.
+**Worker secrets/variables:**
 
-> **Security**: Workers **always enforce API key verification** — every request must include your z.ai API key in the `Authorization: Bearer` header. This cannot be disabled. The Worker rejects requests with missing or mismatched keys (HTTP 401).
+| Name | Type | Purpose |
+|------|------|---------|
+| `UPSTREAM` | variable | z.ai API base URL |
+| `MODEL_MAPPINGS` | variable | JSON `[["z.ai/glm-5.2","glm-5.2"], ...]` |
+| `MODEL_REVERSE` | variable | JSON `[["glm-5.2","z.ai/glm-5.2"], ...]` |
+| `API_KEY` | secret | Real z.ai key (forwarded upstream) |
+| `CURSOR_KEY` | secret | Gateway key (validated, swapped for API_KEY) |
+| `TEST_KEY` | secret | Built-in test key for deployment verification |
 
-#### Configuration files
+**Worker endpoints:**
 
-The proxy uses two configuration files for security:
+| Endpoint | Auth | Purpose |
+|----------|------|---------|
+| `/health` | None | Liveness check |
+| `/test` | TEST_KEY, API_KEY, or CURSOR_KEY | Deployment verification |
+| `/v1/models` | None | Model list with context windows (for Cursor) |
+| `/v1/chat/completions` | API_KEY or CURSOR_KEY | OpenAI-format chat |
+| `/v1/messages` | API_KEY or CURSOR_KEY | Anthropic-format chat |
 
-| File | Contents | Permissions |
-|------|----------|-------------|
-| `%APPDATA%\Z-API-Proxy\config.toml` | Server, upstream URL, tunnel mode, model mappings, Cloudflare account ID | `0600` |
-| `%APPDATA%\Z-API-Proxy\secrets.toml` | API keys, tunnel tokens, Cloudflare API tokens | `0600` |
-
-Secrets are always kept separate from the main config and written with restrictive permissions (`0600` — owner read/write only).
-
-#### Worker vs Tunnel comparison
+**Worker vs Tunnel comparison:**
 
 | Feature | Cloudflare Worker | Cloudflare Tunnel |
 |---------|------------------|-------------------|
-| URL stability | Permanent (never changes) | Ephemeral (Quick) or stable (Named) |
+| URL stability | Permanent | Ephemeral (Quick) or stable (Named) |
 | Requires cloudflared | No | Yes |
-| Requires local proxy running | No (edge → z.ai direct) | Yes (tunnel → local proxy) |
-| API key verification | Always enforced | Optional (`verify_key` setting) |
-| Setup effort | Medium (API token) | Low (Quick) / Medium (Named) |
-| Cost | Free tier: 100k requests/day | Free |
+| Requires local proxy running | No | Yes |
+| Setup effort | Medium | Low / Medium |
+
+## CLI Tools
+
+### cursor-setup-helper.exe
+
+Interactive CLI for configuring Cursor on any machine. Prompts for Worker URL, API key, and API mode (OpenAI/Anthropic/Both).
+
+```
+cursor-setup-helper.exe
+```
+
+### cursor-check.exe
+
+Reads and prints Cursor's current API settings (useful for debugging when settings revert).
+
+```
+cursor-check.exe
+```
+
+### --test-ui flag
+
+Verifies the settings dialog opens correctly (used by automated tests):
+
+```
+z-api-proxy.exe --test-ui
+```
 
 ## Build from Source
 
 Requirements:
 - **Go 1.25+**
-- **[WiX v4+](https://wixtoolset.org/)** (`dotnet tool install -g wix`) for MSI installers
-- **[NSIS](https://nsis.sourceforge.io/)** (optional, for the combined exe installer)
+- **[rsrc](https://github.com/akavel/rsrc)** (`go install github.com/akavel/rsrc@latest`) for icon/manifest embedding
+- **[WiX v4+](https://wixtoolset.org/)** for MSI installers
+- **[NSIS](https://nsis.sourceforge.io/)** (optional)
 
 ```bash
-# Full release build: compiles both architectures, builds MSIs + NSIS installer
-# Artifacts are placed in releases/
+# Run all tests (unit + UI integration)
+test.bat
+
+# Full release build: binaries, MSIs, NSIS installer, CLI tools
 build.bat
 
-# Or build a single binary manually for your architecture
+# Or build a single binary
 go build -ldflags "-H windowsgui -X main.version=dev" -o z-api-proxy.exe .
-
-# Run tests
-go test ./...
 ```
 
 Release artifacts in `releases/`:
@@ -229,26 +232,52 @@ Release artifacts in `releases/`:
 |------|-------------|
 | `z-api-proxy-win-{VERSION}-amd64.msi` | MSI installer for x64 Windows |
 | `z-api-proxy-win-{VERSION}-arm64.msi` | MSI installer for ARM64 Windows |
-| `z-api-proxy-win-{VERSION}-setup.exe` | Combined NSIS installer (auto-detects architecture) |
+| `cursor-setup-helper.exe` | CLI tool for Cursor configuration |
+| `cursor-check.exe` | CLI tool for reading Cursor settings |
 
 ## Architecture
 
 ```
-main.go              Entry point — wiring, HTTP server, embeds tray icons
-                    Version injected via ldflags (-X main.version=...)
+main.go                      Entry point — wiring, HTTP server, --test-ui flag
+                            Version injected via ldflags
 internal/
-├── config/          TOML config with hot-reload via mtime polling (atomic.Pointer)
-├── proxy/           Reverse proxy with bidirectional model-name rewriting
-├── counter/         Atomic request counters (handled/rejected)
-├── tray/            System tray UI, Windows autostart, native dialogs
-├── tunnel/          Cloudflare Quick Tunnel manager (cloudflared subprocess)
-└── updater/         GitHub release checker + MSI auto-updater
+├── config/                  TOML config + secrets.toml, hot-reload (atomic.Pointer)
+├── proxy/                   Reverse proxy with dual auth + model rewriting
+├── counter/                 Atomic request counters
+├── tray/                    System tray, walk-based settings dialog, screenshots
+│   ├── settings_walk.go     Native Windows settings dialog (lxn/walk)
+│   ├── status_window_walk.go  Tunnel status dialog
+│   └── screenshot.go        Window capture for UI tests
+├── tunnel/                  Cloudflare tunnel (quick/named) + API-based creation
+├── updater/                 GitHub release checker + MSI auto-updater
+├── worker/                  Cloudflare Worker deploy, secrets, test endpoints
+│   └── worker.js            Static Worker JS source (GitHub-hosted)
+├── cursor/                  Cursor settings.json integration
+cmd/
+├── cursor-setup-helper/     Interactive CLI for Cursor configuration
+└── cursor-check/            Reads and prints Cursor settings
 ```
 
-## Requirements
+## Supported Models
 
-- **Windows 10/11** (x64 or ARM64)
-- For building: **Go 1.25+**, optionally WiX and NSIS for installers
+All z.ai GLM models with accurate context windows:
+
+| Model | Context | Max Output |
+|-------|---------|------------|
+| GLM-5.2 | 1,048,576 (1M) | 131,072 (128K) |
+| GLM-5.1 | 1,048,576 (1M) | 131,072 (128K) |
+| GLM-5 | 131,072 (128K) | 131,072 (128K) |
+| GLM-5-Turbo | 131,072 (128K) | 131,072 (128K) |
+| GLM-5V-Turbo | 131,072 (128K) | 131,072 (128K) |
+| GLM-4.7 | 131,072 (128K) | 131,072 (128K) |
+| GLM-4.7-Flash | 131,072 (128K) | 131,072 (128K) |
+| GLM-4.7-FlashX | 131,072 (128K) | 131,072 (128K) |
+| GLM-4.6 | 200,000 (200K) | 131,072 (128K) |
+| GLM-4.6V | 131,072 (128K) | 32,768 (32K) |
+| GLM-4.5 | 131,072 (128K) | 98,304 (96K) |
+| GLM-4.5-Air | 131,072 (128K) | 98,304 (96K) |
+| GLM-4.5-Flash | 131,072 (128K) | 98,304 (96K) |
+| GLM-4.5V | 131,072 (128K) | 16,384 (16K) |
 
 ## License
 
@@ -258,7 +287,7 @@ You may use, modify, and deploy this software for any purpose, provided you give
 
 ## Disclaimer
 
-This software is provided **"AS IS"**, free of charge, without warranty of any kind — express or implied. The author bears no responsibility or liability for any damages, data loss, financial loss, or service disruption arising from the use, misuse, or inability to use this software by any person. Users assume all risk associated with deployment and operation, including the management of API credentials, exposure of public endpoints, and compliance with applicable third-party terms of service (Cursor, z.ai, Cloudflare, OpenAI). The author makes no representations regarding the suitability, security, or legality of this software for any particular purpose.
+This software is provided **"AS IS"**, free of charge, without warranty of any kind — express or implied. The author bears no responsibility or liability for any damages, data loss, financial loss, or service disruption arising from the use, misuse, or inability to use this software by any person.
 
 See [LICENSE](LICENSE) for full terms.
 
@@ -267,6 +296,7 @@ See [LICENSE](LICENSE) for full terms.
 ## Links
 
 - **Source:** [github.com/zeevrussak/z-api-proxy](https://github.com/zeevrussak/z-api-proxy)
+- **Worker JS:** [internal/worker/worker.js](internal/worker/worker.js)
 - **z.ai API:** [api.z.ai](https://api.z.ai)
 - **Cursor:** [cursor.com](https://cursor.com)
-- **cloudflared:** [github.com/cloudflare/cloudflared](https://github.com/cloudflare/cloudflared) (Apache 2.0)
+- **Cloudflare Workers:** [workers.cloudflare.com](https://workers.cloudflare.com)

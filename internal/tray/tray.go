@@ -282,7 +282,7 @@ func (t *trayApp) handleMenu(mConfig, mConfigRaw, mTest, mCopyURL, mTunnel, mWor
 		case <-mConfig.ClickedCh:
 			go func() {
 				cfg := t.manager.Get()
-				showSettingsDialog(cfg, t.configPath, t.iconNormal)
+				showSettingsDialogWalk(cfg, t.configPath)
 			}()
 
 		case <-mConfigRaw.ClickedCh:
@@ -345,7 +345,7 @@ func (t *trayApp) toggleTunnel(mTunnel, mCopyURL *systray.MenuItem) {
 		return
 	}
 
-	_, ok := showTunnelWindow(t.tunnel)
+	_, ok := showTunnelWindowWalkV2(t.tunnel)
 	if ok {
 		saveTunnelPref(true)
 		mTunnel.SetTitle("Stop Public Tunnel")

@@ -6,6 +6,8 @@ import (
 	"sync"
 	"syscall"
 	"unsafe"
+
+	"github.com/lxn/walk"
 )
 
 // copyableMsgBox creates a dialog with a selectable, copyable read-only
@@ -246,5 +248,14 @@ func showCopyableMsgBox(text, title string, icon uintptr) {
 }
 
 func messageBoxOrFallback(text, title string, icon uintptr) {
-	showCopyableMsgBox(text, title, icon)
+	var walkIcon walk.MsgBoxStyle
+	switch icon {
+	case mbIconError:
+		walkIcon = walk.MsgBoxIconError
+	case mbIconWarning:
+		walkIcon = walk.MsgBoxIconWarning
+	default:
+		walkIcon = walk.MsgBoxIconInformation
+	}
+	walk.MsgBox(nil, title, text, walkIcon)
 }

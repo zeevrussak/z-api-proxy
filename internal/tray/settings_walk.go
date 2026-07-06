@@ -1,12 +1,13 @@
 // Package tray - walk-based settings dialog.
-// Replaces raw Win32 control positioning with walk's layout engine
-// for automatic DPI scaling, tab order, and resize handling.
+// Uses lxn/walk for native Windows widgets with automatic layout,
+// DPI scaling, tab order, and resize handling.
 
 package tray
 
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/lxn/walk"
@@ -14,176 +15,157 @@ import (
 	"github.com/pelletier/go-toml/v2"
 
 	"z-api-proxy/internal/config"
+	"z-api-proxy/internal/worker"
 )
 
 // showSettingsDialogWalk creates the settings dialog using lxn/walk.
-// This provides native Windows widgets with automatic layout, DPI
-// scaling, tab order, and scroll — replacing the fragile raw Win32
-// control positioning.
 func showSettingsDialogWalk(cfg *config.Config, configPath string) {
-	var dlg *walk.Dialog
-	var db *walk.DataBinder
+	var dlg *walk.MainWindow
 
-	// Mutable copies for the form.
-	listen := cfg.Server.Listen
-	baseURL := cfg.Upstream.BaseURL
-	apiKey := cfg.Upstream.APIKey
-	gatewayKey := cfg.Proxy.CursorKey
-	verifyKey := true // always on
-	tunnelMode := cfg.Tunnel.Mode
-	if tunnelMode == "" {
-		tunnelMode = "quick"
-	}
-	tunnelToken := cfg.Tunnel.Token
-	tunnelHostname := cfg.Tunnel.Hostname
-	cfAccountID := cfg.Cloudflare.AccountID
-	cfAPIToken := cfg.Cloudflare.APIToken
-	workerName := cfg.Cloudflare.WorkerName
-	if workerName == "" {
-		workerName = "z-api-proxy"
-	}
-	workerURL := loadWorkerURL()
-	workerHostname := cfg.Cloudflare.WorkerHostname
-	enableLogging := cfg.Cloudflare.EnableLogging
-
-	// Model mappings for the list box.
+	// Widget handles for reading values on save.
+	var leListen, leBaseURL, leAPIKey, leGatewayKey *walk.LineEdit
+	var leToken, leHostname, leAccountID, leAPIToken *walk.LineEdit
+	var leWorkerName, leWorkerURL, leWorkerHost *walk.LineEdit
+	var cbAPIStyle, cbTunnelMode *walk.ComboBox
+	var chkLogging *walk.CheckBox
 	var modelsLB *walk.ListBox
-	models := cfg.Models
 
+	models := cfg.Models
 	apiStyles := []string{"OpenAI (chat/completions)", "Anthropic (messages)", "Both"}
 	tunnelModes := []string{"Quick (ephemeral URL)", "Named (stable URL)"}
 
-	_, err := Dialog{
+	curAPIStyle := 2 // "Both"
+	curTunnelMode := 0
+	if cfg.Tunnel.Mode == "named" {
+		curTunnelMode = 1
+	}
+
+	_, err := MainWindow{
 		AssignTo: &dlg,
 		Title:    "Z-API Proxy — Settings",
-		MinSize:  Size{Width: 520, Height: 650},
-		Layout: VBox{
-			MarginsZero: false,
-			Spacing:     8,
-		},
+		MinSize:  Size{Width: 500, Height: 600},
+		Size:     Size{Width: 520, Height: 700},
+		Layout:   VBox{Margins: Margins{Left: 10, Top: 10, Right: 10, Bottom: 5}, Spacing: 6},
 		Children: []Widget{
-			// Scroll container for all settings.
 			ScrollView{
-				Layout: VBox{Spacing: 6},
+				Layout: VBox{Spacing: 6, MarginsZero: true},
 				Children: []Widget{
-					// Server section.
+					// ── Server ──
 					GroupBox{
 						Title:  "Server",
-						Layout: Grid{Columns: 2, Spacing: 8},
+						Layout: Grid{Columns: 2, Spacing: 6, Margins: Margins{Left: 8, Top: 4, Right: 8, Bottom: 4}},
 						Children: []Widget{
 							Label{Text: "Listen Address:"},
-							LineEdit{Text: Bind("Listen")},
+							LineEdit{AssignTo: &leListen, Text: cfg.Server.Listen},
 						},
 					},
 
-					// Upstream section.
+					// ── Upstream ──
 					GroupBox{
 						Title:  "Upstream",
-						Layout: Grid{Columns: 2, Spacing: 8},
+						Layout: Grid{Columns: 2, Spacing: 6, Margins: Margins{Left: 8, Top: 4, Right: 8, Bottom: 4}},
 						Children: []Widget{
 							Label{Text: "Base URL:"},
-							LineEdit{Text: Bind("BaseURL"), AssignTo: nil},
+							LineEdit{AssignTo: &leBaseURL, Text: cfg.Upstream.BaseURL},
 
 							Label{Text: "API Key:"},
-							Composite{
-								Layout: HBox{Spacing: 4, MarginsZero: true},
-								Children: []Widget{
-									LineEdit{Text: Bind("APIKey"), PasswordMode: true},
-									PushButton{Text: "Test Connection", OnClicked: func() {
-										// TODO: wire to testConnectionFromSettings
-									}},
-								},
-							},
+							LineEdit{AssignTo: &leAPIKey, Text: cfg.Upstream.APIKey, PasswordMode: true},
 
 							Label{Text: "Gateway Key:"},
-							LineEdit{Text: Bind("GatewayKey"), PasswordMode: true},
+							LineEdit{AssignTo: &leGatewayKey, Text: cfg.Proxy.CursorKey, PasswordMode: true},
 
 							Label{Text: "API Style:"},
-							ComboBox{
-								Model:    apiStyles,
-								CurrentIndex: 2, // "Both" by default
+							ComboBox{AssignTo: &cbAPIStyle, Model: apiStyles, CurrentIndex: curAPIStyle},
+
+							Label{Text: ""},
+							PushButton{
+								Text: "Test Connection",
+								OnClicked: func() {
+									key := leAPIKey.Text()
+									if key == "" {
+										walk.MsgBox(dlg, "Z-API Proxy — Test", "No API key entered.", walk.MsgBoxIconWarning)
+										return
+									}
+									wURL := strings.TrimSpace(leWorkerURL.Text())
+									go testConnectionWalk(dlg, wURL, key, leBaseURL.Text())
+								},
 							},
 						},
 					},
 
-					// Security section.
+					// ── Security ──
 					GroupBox{
 						Title:  "Security",
-						Layout: VBox{},
+						Layout: VBox{Margins: Margins{Left: 8, Top: 4, Right: 8, Bottom: 4}},
 						Children: []Widget{
 							CheckBox{
-								Text:     "Verify API Key — always enabled (required for security)",
-								Checked:  Bind("VerifyKey"),
-								Enabled:  false, // always on, shown but disabled
+								Text:    "Verify API Key — always enabled (required for security)",
+								Checked: true,
+								Enabled: false,
 							},
 						},
 					},
 
-					// Tunnel section.
+					// ── Tunnel ──
 					GroupBox{
 						Title:  "Tunnel",
-						Layout: Grid{Columns: 2, Spacing: 8},
+						Layout: Grid{Columns: 2, Spacing: 6, Margins: Margins{Left: 8, Top: 4, Right: 8, Bottom: 4}},
 						Children: []Widget{
 							Label{Text: "Mode:"},
-							ComboBox{
-								Model:    tunnelModes,
-								BindingMember: "mode",
-							},
+							ComboBox{AssignTo: &cbTunnelMode, Model: tunnelModes, CurrentIndex: curTunnelMode},
 
 							Label{Text: "Token:"},
-							LineEdit{Text: Bind("TunnelToken"), PasswordMode: true},
+							LineEdit{AssignTo: &leToken, Text: cfg.Tunnel.Token, PasswordMode: true},
 
 							Label{Text: "Hostname:"},
-							LineEdit{Text: Bind("TunnelHostname")},
+							LineEdit{AssignTo: &leHostname, Text: cfg.Tunnel.Hostname},
 						},
 					},
 
-					// Cloudflare Worker section.
+					// ── Cloudflare Worker ──
 					GroupBox{
 						Title:  "Cloudflare Worker",
-						Layout: Grid{Columns: 2, Spacing: 8},
+						Layout: Grid{Columns: 2, Spacing: 6, Margins: Margins{Left: 8, Top: 4, Right: 8, Bottom: 4}},
 						Children: []Widget{
 							Label{Text: "Account ID:"},
-							LineEdit{Text: Bind("AccountID")},
+							LineEdit{AssignTo: &leAccountID, Text: cfg.Cloudflare.AccountID},
 
 							Label{Text: "API Token:"},
-							LineEdit{Text: Bind("APIToken"), PasswordMode: true},
+							LineEdit{AssignTo: &leAPIToken, Text: cfg.Cloudflare.APIToken, PasswordMode: true},
 
 							Label{Text: "Worker Name:"},
-							LineEdit{Text: Bind("WorkerName")},
+							LineEdit{AssignTo: &leWorkerName, Text: workerNameOrDefault(cfg)},
 
 							Label{Text: "Worker URL:"},
-							LineEdit{Text: Bind("WorkerURL")},
+							LineEdit{AssignTo: &leWorkerURL, Text: loadWorkerURL()},
 
 							Label{Text: "Custom Domain:"},
-							LineEdit{Text: Bind("WorkerHostname")},
+							LineEdit{AssignTo: &leWorkerHost, Text: cfg.Cloudflare.WorkerHostname},
 
 							CheckBox{
+								AssignTo: &chkLogging,
 								Text:    "Enable logging",
-								Checked: Bind("EnableLogging"),
+								Checked: cfg.Cloudflare.EnableLogging,
 							},
 						},
 					},
 
-					// Model Mappings section.
+					// ── Model Mappings ──
 					GroupBox{
 						Title:  "Model Mappings",
-						Layout: VBox{Spacing: 4},
+						Layout: VBox{Spacing: 4, Margins: Margins{Left: 8, Top: 4, Right: 8, Bottom: 4}},
 						Children: []Widget{
 							ListBox{
 								AssignTo: &modelsLB,
 								Model:    modelMappingModel{items: models},
-								OnItemActivated: func() {
-									// TODO: edit model
-								},
+								MinSize:  Size{Height: 120},
 							},
 							Composite{
-								Layout: HBox{Spacing: 4},
+								Layout: HBox{Spacing: 4, MarginsZero: true},
 								Children: []Widget{
 									PushButton{Text: "Add", OnClicked: func() {
 										models = append(models, config.ModelMapping{
-											From: "z.ai/new-model",
-											To:   "new-model",
+											From: "z.ai/new-model", To: "new-model",
 										})
 										modelsLB.SetModel(modelMappingModel{items: models})
 									}},
@@ -201,41 +183,92 @@ func showSettingsDialogWalk(cfg *config.Config, configPath string) {
 				},
 			},
 
-			// Bottom buttons — always visible, outside scroll.
+			// ── Bottom buttons ──
 			Composite{
 				Layout: HBox{MarginsZero: true, Spacing: 8},
 				Children: []Widget{
 					HSpacer{},
 					PushButton{
-						Text:    "Save",
+						Text: "Save",
 						OnClicked: func() {
-							if db != nil {
-								db.Submit()
-							}
-							saveSettingsWalk(cfg, configPath, listen, baseURL, apiKey,
-								gatewayKey, tunnelMode, tunnelToken, tunnelHostname,
-								cfAccountID, cfAPIToken, workerName, workerURL,
-								workerHostname, enableLogging, models)
-							dlg.Accept()
+							saveSettingsWalk(cfg, configPath,
+								leListen.Text(), leBaseURL.Text(), leAPIKey.Text(),
+								leGatewayKey.Text(), tunnelModeFromCombo(cbTunnelMode),
+								leToken.Text(), leHostname.Text(),
+								leAccountID.Text(), leAPIToken.Text(),
+								leWorkerName.Text(), leWorkerURL.Text(),
+								leWorkerHost.Text(),
+								chkLogging.Checked(),
+								models)
+							apiStyle := apiStyleFromCombo(cbAPIStyle)
+							saveApiModePref(apiStyle)
+							dlg.Close()
 						},
 					},
 					PushButton{
 						Text: "Cancel",
 						OnClicked: func() {
-							dlg.Cancel()
+							dlg.Close()
 						},
 					},
 				},
 			},
 		},
-	}.Run(nil)
+	}.Run()
 
 	if err != nil {
 		// Fallback to raw Win32 dialog if walk fails.
 		showSettingsDialog(cfg, configPath, nil)
 	}
-	_ = db
-	_ = verifyKey
+}
+
+// workerNameOrDefault returns WorkerName or "z-api-proxy".
+func workerNameOrDefault(cfg *config.Config) string {
+	if cfg.Cloudflare.WorkerName != "" {
+		return cfg.Cloudflare.WorkerName
+	}
+	return "z-api-proxy"
+}
+
+// tunnelModeFromCombo returns "quick" or "named".
+func tunnelModeFromCombo(cb *walk.ComboBox) string {
+	if cb == nil {
+		return "quick"
+	}
+	i := cb.CurrentIndex()
+	if i == 1 {
+		return "named"
+	}
+	return "quick"
+}
+
+// apiStyleFromCombo returns "openai", "anthropic", or "both".
+func apiStyleFromCombo(cb *walk.ComboBox) string {
+	if cb == nil {
+		return "both"
+	}
+	switch cb.CurrentIndex() {
+	case 0:
+		return "openai"
+	case 1:
+		return "anthropic"
+	default:
+		return "both"
+	}
+}
+
+// saveApiModePref persists the API mode preference.
+func saveApiModePref(mode string) {
+	os.WriteFile(filepath.Join(config.AppConfigDir(), "api-mode.pref"), []byte(mode), 0600)
+}
+
+// loadApiModePref reads the saved API mode preference.
+func loadApiModePref() string {
+	data, err := os.ReadFile(filepath.Join(config.AppConfigDir(), "api-mode.pref"))
+	if err != nil {
+		return "both"
+	}
+	return strings.TrimSpace(string(data))
 }
 
 // modelMappingModel provides data for the ListBox.
@@ -322,4 +355,28 @@ func saveSettingsWalk(cfg *config.Config, configPath string,
 	} else {
 		clearWorkerURL()
 	}
+}
+
+// testConnectionWalk tests the connection from the walk dialog.
+func testConnectionWalk(parent walk.Form, workerURL, apiKey, baseURL string) {
+	if workerURL != "" {
+		_, err := workerTestChat(workerURL, apiKey)
+		if err != nil {
+			walk.MsgBox(parent, "Z-API Proxy — Test", "Chat test failed:\n\n"+err.Error(), walk.MsgBoxIconError)
+			return
+		}
+		walk.MsgBox(parent, "Z-API Proxy — Test", "Worker chat test successful!", walk.MsgBoxIconInformation)
+		return
+	}
+
+	// Test upstream directly.
+	testURL := strings.TrimSuffix(baseURL, "/") + "/models"
+	_ = testURL
+	// TODO: implement upstream test
+	walk.MsgBox(parent, "Z-API Proxy — Test", "Direct upstream test not implemented yet.", walk.MsgBoxIconInformation)
+}
+
+// workerTestChat sends a test chat request through the Worker.
+func workerTestChat(workerURL, apiKey string) (string, error) {
+	return worker.TestChat(workerURL, apiKey)
 }

@@ -43,6 +43,37 @@ export default {
       return new Response('OK', { status: 200 });
     }
 
+    // /test endpoint: validates any accepted key (API_KEY, CURSOR_KEY, or built-in test key).
+    // Returns OK with which key was matched. Used by deployment tests.
+    if (url.pathname === '/test') {
+      const TEST_KEY = 'testkey_41324124#$!F';
+      if (sentKey === TEST_KEY) {
+        return new Response(JSON.stringify({
+          status: 'OK',
+          matched: 'TEST_KEY',
+          method: request.method,
+          path: url.pathname
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (API_KEY && sentKey === API_KEY) {
+        return new Response(JSON.stringify({
+          status: 'OK',
+          matched: 'API_KEY'
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (CURSOR_KEY && sentKey === CURSOR_KEY) {
+        return new Response(JSON.stringify({
+          status: 'OK',
+          matched: 'CURSOR_KEY'
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      return new Response(JSON.stringify({
+        status: 'FAIL',
+        message: 'No matching key found',
+        received: sentPrefix ? sentPrefix + '...' : 'NONE'
+      }), { status: 401, headers: { 'Content-Type': 'application/json' } });
+    }
+
     // /v1/models is public — returns capabilities without auth.
     // Cursor reads context_length and max_tokens from here.
     if (url.pathname === '/v1/models' || url.pathname === '/models') {

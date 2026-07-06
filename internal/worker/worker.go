@@ -435,6 +435,28 @@ func GetDeployedURL(cfg *config.Config) (string, error) {
 	return getWorkerURL(client, cfg, workerName(cfg))
 }
 
+// TestDeployedWorker calls the /test endpoint with the built-in test key
+// to verify the Worker is deployed and responding correctly.
+func TestDeployedWorker(workerURL string) error {
+	client := &http.Client{Timeout: 15 * time.Second}
+	req, err := http.NewRequest("GET", workerURL+"/test", nil)
+	if err != nil {
+		return fmt.Errorf("cannot create request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer testkey_41324124#$!F")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("worker unreachable: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("worker /test returned HTTP %d (expected 200)", resp.StatusCode)
+	}
+	return nil
+}
+
 // truncate limits a string to maxLen characters with ellipsis.
 func truncate(s string, maxLen int) string {
 	if len(s) <= maxLen {

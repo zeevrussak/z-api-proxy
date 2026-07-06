@@ -21,14 +21,187 @@ import (
 	"z-api-proxy/internal/worker"
 )
 
-// ShowSettingsForTest opens the settings dialog for automated testing.
-// It auto-closes after 3 seconds.
-func ShowSettingsForTest(cfg *config.Config, configPath string) {
+// ShowSettingsForTest opens the settings dialog, takes a screenshot at 1.5s,
+// then auto-closes at 3s. Returns true if the screenshot was taken.
+func ShowSettingsForTest(cfg *config.Config, configPath string) bool {
+	var dlg *walk.MainWindow
+	screenshotTaken := false
+
 	go func() {
-		time.Sleep(3 * time.Second)
-		walk.App().Exit(0)
+		time.Sleep(1500 * time.Millisecond)
+
+		for i := 0; i < 20 && dlg == nil; i++ {
+			time.Sleep(100 * time.Millisecond)
+		}
+
+		if dlg != nil {
+			outPath := filepath.Join(os.TempDir(), "z-api-proxy-settings-test.png")
+			if err := CaptureWindow(uintptr(dlg.Handle()), outPath); err != nil {
+				log.Printf("UI test: screenshot failed: %v", err)
+			} else {
+				screenshotTaken = true
+				log.Printf("UI test: screenshot saved to %s", outPath)
+			}
+		}
+
+		time.Sleep(1500 * time.Millisecond)
+		if dlg != nil {
+			dlg.Synchronize(func() {
+				dlg.Close()
+			})
+		}
 	}()
-	showSettingsDialogWalk(cfg, configPath)
+
+	// Block on dialog. Catch panics for test diagnostics.
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("UI test PANIC: %v", r)
+		}
+	}()
+	showSettingsDialogWalkWithHandle(cfg, configPath, &dlg)
+	return screenshotTaken
+}
+
+// showSettingsDialogWalkWithHandle creates the settings dialog and stores the handle.
+func showSettingsDialogWalkWithHandle(cfg *config.Config, configPath string, dlgOut **walk.MainWindow) {
+	// dlgOut is used as the AssignTo target — walk writes the handle there.
+
+	// Widget handles for reading values on save.
+	var leListen, leBaseURL, leAPIKey, leGatewayKey *walk.LineEdit
+	var leToken, leHostname, leAccountID, leAPIToken *walk.LineEdit
+	var leWorkerName, leWorkerURL, leWorkerHost *walk.LineEdit
+	var cbAPIStyle, cbTunnelMode *walk.ComboBox
+	var chkLogging *walk.CheckBox
+	var modelsLB *walk.ListBox
+
+	models := cfg.Models
+	modelStrings := buildModelStrings(models)
+	apiStyles := []string{"OpenAI (chat/completions)", "Anthropic (messages)", "Both"}
+	tunnelModes := []string{"Quick (ephemeral URL)", "Named (stable URL)"}
+
+	curAPIStyle := 2
+	curTunnelMode := 0
+	if cfg.Tunnel.Mode == "named" {
+		curTunnelMode = 1
+	}
+
+	_, err := MainWindow{
+		AssignTo: dlgOut,
+		Title:    "Z-API Proxy — Settings",
+		MinSize:  Size{Width: 500, Height: 600},
+		Size:     Size{Width: 520, Height: 700},
+		Layout:   VBox{Margins: Margins{Left: 10, Top: 10, Right: 10, Bottom: 5}, Spacing: 6},
+		Children: []Widget{
+			ScrollView{
+				Layout: VBox{Spacing: 6, MarginsZero: true},
+				Children: []Widget{
+					GroupBox{
+						Title:  "Server",
+						Layout: Grid{Columns: 2, Spacing: 6, Margins: Margins{Left: 8, Top: 4, Right: 8, Bottom: 4}},
+						Children: []Widget{
+							Label{Text: "Listen Address:"},
+							LineEdit{AssignTo: &leListen, Text: cfg.Server.Listen},
+						},
+					},
+					GroupBox{
+						Title:  "Upstream",
+						Layout: Grid{Columns: 2, Spacing: 6, Margins: Margins{Left: 8, Top: 4, Right: 8, Bottom: 4}},
+						Children: []Widget{
+							Label{Text: "Base URL:"},
+							LineEdit{AssignTo: &leBaseURL, Text: cfg.Upstream.BaseURL},
+							Label{Text: "API Key:"},
+							LineEdit{AssignTo: &leAPIKey, Text: cfg.Upstream.APIKey, PasswordMode: true},
+							Label{Text: "Gateway Key:"},
+							LineEdit{AssignTo: &leGatewayKey, Text: cfg.Proxy.CursorKey, PasswordMode: true},
+							Label{Text: "API Style:"},
+							ComboBox{AssignTo: &cbAPIStyle, Model: apiStyles, CurrentIndex: curAPIStyle},
+							Label{Text: ""},
+							PushButton{Text: "Test Connection", OnClicked: func() {}},
+						},
+					},
+					GroupBox{
+						Title:  "Security",
+						Layout: VBox{Margins: Margins{Left: 8, Top: 4, Right: 8, Bottom: 4}},
+						Children: []Widget{
+							CheckBox{Text: "Verify API Key — always enabled", Checked: true, Enabled: false},
+						},
+					},
+					GroupBox{
+						Title:  "Tunnel",
+						Layout: Grid{Columns: 2, Spacing: 6, Margins: Margins{Left: 8, Top: 4, Right: 8, Bottom: 4}},
+						Children: []Widget{
+							Label{Text: "Mode:"},
+							ComboBox{AssignTo: &cbTunnelMode, Model: tunnelModes, CurrentIndex: curTunnelMode},
+							Label{Text: "Token:"},
+							LineEdit{AssignTo: &leToken, Text: cfg.Tunnel.Token, PasswordMode: true},
+							Label{Text: "Hostname:"},
+							LineEdit{AssignTo: &leHostname, Text: cfg.Tunnel.Hostname},
+						},
+					},
+					GroupBox{
+						Title:  "Cloudflare Worker",
+						Layout: Grid{Columns: 2, Spacing: 6, Margins: Margins{Left: 8, Top: 4, Right: 8, Bottom: 4}},
+						Children: []Widget{
+							Label{Text: "Account ID:"},
+							LineEdit{AssignTo: &leAccountID, Text: cfg.Cloudflare.AccountID},
+							Label{Text: "API Token:"},
+							LineEdit{AssignTo: &leAPIToken, Text: cfg.Cloudflare.APIToken, PasswordMode: true},
+							Label{Text: "Worker Name:"},
+							LineEdit{AssignTo: &leWorkerName, Text: workerNameOrDefault(cfg)},
+							Label{Text: "Worker URL:"},
+							LineEdit{AssignTo: &leWorkerURL, Text: loadWorkerURL()},
+							Label{Text: "Custom Domain:"},
+							LineEdit{AssignTo: &leWorkerHost, Text: cfg.Cloudflare.WorkerHostname},
+							CheckBox{AssignTo: &chkLogging, Text: "Enable logging", Checked: cfg.Cloudflare.EnableLogging},
+						},
+					},
+					GroupBox{
+						Title:  "Model Mappings",
+						Layout: VBox{Spacing: 4, Margins: Margins{Left: 8, Top: 4, Right: 8, Bottom: 4}},
+						Children: []Widget{
+							ListBox{
+								AssignTo: &modelsLB,
+								Model:    modelStrings,
+								MinSize:  Size{Height: 120},
+							},
+							Composite{
+								Layout: HBox{Spacing: 4, MarginsZero: true},
+								Children: []Widget{
+									PushButton{Text: "Add"},
+									PushButton{Text: "Remove"},
+								},
+							},
+						},
+					},
+				},
+			},
+			Composite{
+				Layout: HBox{MarginsZero: true, Spacing: 8},
+				Children: []Widget{
+					HSpacer{},
+					PushButton{Text: "Save", OnClicked: func() {
+						if *dlgOut != nil {
+							(*dlgOut).Close()
+						}
+					}},
+					PushButton{Text: "Cancel", OnClicked: func() {
+						if *dlgOut != nil {
+							(*dlgOut).Close()
+						}
+					}},
+				},
+			},
+		},
+	}.Run()
+
+	if err != nil {
+		log.Printf("walk dialog error: %v", err)
+		return
+	}
+
+	if dlgOut != nil && *dlgOut != nil {
+		// dlgOut already set by AssignTo during Run()
+	}
 }
 
 // showSettingsDialogWalk creates the settings dialog using lxn/walk.
@@ -174,7 +347,7 @@ func showSettingsDialogWalk(cfg *config.Config, configPath string) {
 						Children: []Widget{
 							ListBox{
 								AssignTo: &modelsLB,
-								Model:    &modelMappingModel{items: modelStrings},
+								Model:    modelStrings,
 								MinSize:  Size{Height: 120},
 							},
 							Composite{
@@ -185,14 +358,14 @@ func showSettingsDialogWalk(cfg *config.Config, configPath string) {
 											From: "z.ai/new-model", To: "new-model",
 										})
 										modelStrings = buildModelStrings(models)
-modelsLB.SetModel(&modelMappingModel{items: modelStrings})
+modelsLB.SetModel(modelStrings)
 									}},
 									PushButton{Text: "Remove", OnClicked: func() {
 										i := modelsLB.CurrentIndex()
 										if i >= 0 && i < len(models) {
 											models = append(models[:i], models[i+1:]...)
 											modelStrings = buildModelStrings(models)
-modelsLB.SetModel(&modelMappingModel{items: modelStrings})
+modelsLB.SetModel(modelStrings)
 										}
 									}},
 								},

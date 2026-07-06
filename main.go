@@ -16,7 +16,6 @@ package main
 import (
 	"context"
 	_ "embed"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -98,30 +97,12 @@ func testUISettings() int {
 	}
 	cfg := manager.Get()
 
-	// Launch settings in a goroutine. The dialog blocks its own thread.
-	opened := make(chan bool, 1)
-	errCh := make(chan error, 1)
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				errCh <- fmt.Errorf("settings dialog panicked: %v", r)
-			}
-		}()
-		opened <- true // signal that we started without panicking
-		tray.ShowSettingsForTest(cfg, configPath)
-	}()
-
-	select {
-	case <-opened:
-		// Dialog launched. Wait 2s then signal success.
-		time.Sleep(2 * time.Second)
-		log.Println("UI test: settings window opened successfully")
+	// ShowSettingsForTest blocks until the window closes (auto-close at 3s).
+	result := tray.ShowSettingsForTest(cfg, configPath)
+	if result {
+		log.Println("UI test: settings window opened and closed successfully")
 		return 0
-	case err := <-errCh:
-		log.Printf("UI test FAILED: %v", err)
-		return 1
-	case <-time.After(10 * time.Second):
-		log.Println("UI test FAILED: timeout waiting for dialog")
-		return 1
 	}
+	log.Println("UI test FAILED: window did not open")
+	return 1
 }

@@ -163,7 +163,7 @@ func showSettingsDialogWalk(cfg *config.Config, configPath string) {
 						Children: []Widget{
 							ListBox{
 								AssignTo: &modelsLB,
-								Model:    modelMappingModel{items: modelStrings},
+								Model:    &modelMappingModel{items: modelStrings},
 								MinSize:  Size{Height: 120},
 							},
 							Composite{

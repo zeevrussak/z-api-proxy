@@ -7,14 +7,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/getlantern/systray"
 	"github.com/lxn/walk"
-	. "github.com/lxn/walk/declarative"
 	"golang.org/x/sys/windows/registry"
 
 	"z-api-proxy/internal/config"
@@ -554,13 +552,7 @@ func (t *trayApp) registerModels() {
 		modelNames = append(modelNames, m.From)
 	}
 
-	// Ask which API mode to configure.
-	mode := askApiMode()
-	if mode == "" {
-		return
-	}
-
-	settingsPath, err := cursorint.RegisterModels(proxyURL, modelNames, cfg.Proxy.CursorKey, mode)
+	settingsPath, err := cursorint.RegisterModels(proxyURL, modelNames, cfg.Proxy.CursorKey)
 	if err != nil {
 		log.Printf("register models error: %v", err)
 		messageBox("Failed to register models in Cursor:\n\n"+err.Error(),
@@ -704,60 +696,4 @@ func updateTOMLValue(tomlText, section, key, value string) string {
 	}
 
 	return strings.Join(lines, "\n")
-}
-
-// askApiMode shows a walk dialog with a ComboBox for API format selection.
-// Returns "openai", "anthropic", "both", or "" (cancelled).
-func askApiMode() string {
-	runtime.LockOSThread()
-	defer runtime.UnlockOSThread()
-
-	choices := []string{"OpenAI (chat/completions)", "Anthropic (messages)", "Both"}
-	accepted := false
-	var cb *walk.ComboBox
-	var dlg *walk.Dialog
-
-	_, err := Dialog{
-		AssignTo: &dlg,
-		Title:    "Z-API Proxy — Cursor Setup",
-		MinSize:  Size{Width: 350, Height: 150},
-		Layout:   VBox{Margins: Margins{Left: 15, Top: 15, Right: 15, Bottom: 10}, Spacing: 10},
-		Children: []Widget{
-			Label{Text: "Configure Cursor for which API format?"},
-			ComboBox{AssignTo: &cb, Model: choices, CurrentIndex: 2},
-			Composite{
-				Layout: HBox{MarginsZero: true, Spacing: 8},
-				Children: []Widget{
-					HSpacer{},
-					PushButton{
-						Text: "OK",
-						OnClicked: func() {
-							accepted = true
-							dlg.Accept()
-						},
-					},
-					PushButton{
-						Text: "Cancel",
-						OnClicked: func() {
-							accepted = false
-							dlg.Cancel()
-						},
-					},
-				},
-			},
-		},
-	}.Run(nil)
-
-	if err != nil || !accepted || cb == nil {
-		return ""
-	}
-
-	switch cb.CurrentIndex() {
-	case 0:
-		return "openai"
-	case 1:
-		return "anthropic"
-	default:
-		return "both"
-	}
 }

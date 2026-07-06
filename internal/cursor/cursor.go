@@ -36,11 +36,10 @@ func IsInstalled() bool {
 }
 
 // RegisterModels writes the proxy base URL and model names into Cursor's
-// settings.json. When cursorKey is non-empty, it's the proxy access token
-// that Cursor sends (not the real z.ai key).
-// mode controls which API format to configure: "openai", "anthropic", or "both".
+// settings.json using the OpenAI API override (the only one Cursor supports).
+// cursorKey is the Gateway Worker Key that Cursor will send.
 // Returns the path to settings.json and nil on success.
-func RegisterModels(proxyURL string, modelNames []string, cursorKey string, mode string) (string, error) {
+func RegisterModels(proxyURL string, modelNames []string, cursorKey string) (string, error) {
 	settingsPath := SettingsPath()
 	if settingsPath == "" {
 		return "", fmt.Errorf("Cursor installation not found (expected %%APPDATA%%\\Cursor\\User\\settings.json)")
@@ -56,23 +55,14 @@ func RegisterModels(proxyURL string, modelNames []string, cursorKey string, mode
 		return "", fmt.Errorf("cannot parse Cursor settings: %w", err)
 	}
 
-	// Configure based on mode.
-	if mode == "openai" || mode == "both" {
-		settings["cursor.general.openaiApiBaseUrl"] = proxyURL
-		settings["cursor.general.enableOpenaiApiBaseUrl"] = true
-		if cursorKey != "" {
-			settings["cursor.general.openaiApiKey"] = cursorKey
-		}
-	}
-	if mode == "anthropic" || mode == "both" {
-		settings["cursor.general.anthropicApiBaseUrl"] = proxyURL
-		settings["cursor.general.enableAnthropicApiBaseUrl"] = true
-		if cursorKey != "" {
-			settings["cursor.general.anthropicApiKey"] = cursorKey
-		}
+	// Configure OpenAI API override (the only API Cursor supports for custom models).
+	settings["cursor.general.openaiApiBaseUrl"] = proxyURL
+	settings["cursor.general.enableOpenaiApiBaseUrl"] = true
+	if cursorKey != "" {
+		settings["cursor.general.openaiApiKey"] = cursorKey
 	}
 
-	// Add model names (shared for both API styles).
+	// Add model names.
 	existingModels, _ := settings["cursor.general.modelNames"].([]interface{})
 	modelSet := make(map[string]bool)
 	for _, m := range existingModels {

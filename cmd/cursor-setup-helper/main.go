@@ -80,32 +80,10 @@ func main() {
 	}
 	fmt.Println()
 
-	// Ask which API mode.
-	fmt.Println("Which API format should Cursor use?")
-	fmt.Println("  1. OpenAI (chat/completions)")
-	fmt.Println("  2. Anthropic (messages)")
-	fmt.Println("  3. Both")
-	fmt.Print("Choice (1/2/3): ")
-	modeChoice, _ := reader.ReadString('\n')
-	modeChoice = strings.TrimSpace(modeChoice)
-	mode := "both"
-	switch modeChoice {
-	case "1":
-		mode = "openai"
-	case "2":
-		mode = "anthropic"
-	case "3", "":
-		mode = "both"
-	default:
-		fmt.Println("Invalid choice, defaulting to Both.")
-	}
-	fmt.Println()
-
 	// Confirm.
 	fmt.Println("Ready to configure Cursor with:")
 	fmt.Println("  Base URL: " + workerURL)
 	fmt.Println("  API Key:  " + maskKey(apiKey))
-	fmt.Println("  Mode:     " + mode)
 	fmt.Println("  Models:   " + fmt.Sprintf("%d z.ai GLM models", len(modelNames)))
 	fmt.Println()
 	fmt.Print("Proceed? (Y/n): ")
@@ -118,7 +96,7 @@ func main() {
 	}
 
 	// Apply settings.
-	err := applySettings(settingsPath, workerURL, apiKey, mode)
+	err := applySettings(settingsPath, workerURL, apiKey)
 	if err != nil {
 		fmt.Println("ERROR: " + err.Error())
 		waitExit(reader)
@@ -160,7 +138,7 @@ func maskKey(key string) string {
 }
 
 // applySettings reads, merges, and writes Cursor's settings.json.
-func applySettings(settingsPath, proxyURL, apiKey, mode string) error {
+func applySettings(settingsPath, proxyURL, apiKey string) error {
 	raw, err := os.ReadFile(settingsPath)
 	if err != nil {
 		return fmt.Errorf("cannot read settings: %w", err)
@@ -171,16 +149,9 @@ func applySettings(settingsPath, proxyURL, apiKey, mode string) error {
 		return fmt.Errorf("cannot parse settings: %w", err)
 	}
 
-	if mode == "openai" || mode == "both" {
-		settings["cursor.general.openaiApiBaseUrl"] = proxyURL
-		settings["cursor.general.enableOpenaiApiBaseUrl"] = true
-		settings["cursor.general.openaiApiKey"] = apiKey
-	}
-	if mode == "anthropic" || mode == "both" {
-		settings["cursor.general.anthropicApiBaseUrl"] = proxyURL
-		settings["cursor.general.enableAnthropicApiBaseUrl"] = true
-		settings["cursor.general.anthropicApiKey"] = apiKey
-	}
+	settings["cursor.general.openaiApiBaseUrl"] = proxyURL
+	settings["cursor.general.enableOpenaiApiBaseUrl"] = true
+	settings["cursor.general.openaiApiKey"] = apiKey
 
 	// Merge model names (don't overwrite existing).
 	existing, _ := settings["cursor.general.modelNames"].([]interface{})

@@ -1,5 +1,6 @@
 *.exe
 *.log
+*.lnk
 *.msi
 *.wixpdb
 z-api-proxy-win-setup.exe

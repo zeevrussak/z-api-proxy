@@ -136,9 +136,18 @@ export default {
 
     if (request.method === 'POST' || request.method === 'PUT' || request.method === 'PATCH') {
       reqBody = await request.text();
+      // Log the model name from the request body for debugging.
+      const modelMatch = reqBody.match(/"model"\s*:\s*"([^"]+)"/);
+      if (modelMatch) {
+        console.log('[z-api-proxy]   model BEFORE rewrite: ' + modelMatch[1]);
+      }
       for (const [from, to] of FORWARD_MAP) {
         reqBody = reqBody.replaceAll('"model":"' + from + '"', '"model":"' + to + '"');
         reqBody = reqBody.replaceAll('"model": "' + from + '"', '"model": "' + to + '"');
+      }
+      const modelAfter = reqBody.match(/"model"\s*:\s*"([^"]+)"/);
+      if (modelAfter) {
+        console.log('[z-api-proxy]   model AFTER rewrite:  ' + modelAfter[1]);
       }
       init.body = reqBody;
     }
@@ -178,8 +187,13 @@ export default {
     try {
       upstreamResp = await fetch(upstreamReq);
     } catch (e) {
-      return new Response('upstream unreachable: ' + e.message, { status: 502 });
+      console.log('[z-api-proxy] UPSTREAM FETCH ERROR: ' + e.message);
+      return new Response(JSON.stringify({
+        error: { message: 'upstream unreachable: ' + e.message, type: 'server_error' }
+      }), { status: 502, headers: { 'Content-Type': 'application/json' } });
     }
+
+    console.log('[z-api-proxy]   upstream returned HTTP ' + upstreamResp.status);
 
     const respHeaders = new Headers();
     for (const [key, value] of upstreamResp.headers.entries()) {

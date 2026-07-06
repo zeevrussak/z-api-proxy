@@ -37,9 +37,10 @@ func IsInstalled() bool {
 
 // RegisterModels writes the proxy base URL and model names into Cursor's
 // settings.json. When cursorKey is non-empty, it's the proxy access token
-// that Cursor sends (not the real z.ai key). Returns the path to
-// settings.json and nil on success.
-func RegisterModels(proxyURL string, modelNames []string, cursorKey string) (string, error) {
+// that Cursor sends (not the real z.ai key).
+// mode controls which API format to configure: "openai", "anthropic", or "both".
+// Returns the path to settings.json and nil on success.
+func RegisterModels(proxyURL string, modelNames []string, cursorKey string, mode string) (string, error) {
 	settingsPath := SettingsPath()
 	if settingsPath == "" {
 		return "", fmt.Errorf("Cursor installation not found (expected %%APPDATA%%\\Cursor\\User\\settings.json)")
@@ -55,15 +56,23 @@ func RegisterModels(proxyURL string, modelNames []string, cursorKey string) (str
 		return "", fmt.Errorf("cannot parse Cursor settings: %w", err)
 	}
 
-	// Add the proxy base URL for the OpenAI API override.
-	settings["cursor.general.openaiApiBaseUrl"] = proxyURL
+	// Configure based on mode.
+	if mode == "openai" || mode == "both" {
+		settings["cursor.general.openaiApiBaseUrl"] = proxyURL
+		settings["cursor.general.enableOpenaiApiBaseUrl"] = true
+		if cursorKey != "" {
+			settings["cursor.general.openaiApiKey"] = cursorKey
+		}
+	}
+	if mode == "anthropic" || mode == "both" {
+		settings["cursor.general.anthropicApiBaseUrl"] = proxyURL
+		settings["cursor.general.enableAnthropicApiBaseUrl"] = true
+		if cursorKey != "" {
+			settings["cursor.general.anthropicApiKey"] = cursorKey
+		}
+	}
 
-	// Enable the "Override OpenAI Base URL" toggle so Cursor actually
-	// uses the proxy URL instead of routing through its own servers.
-	settings["cursor.general.enableOpenaiApiBaseUrl"] = true
-
-	// Add model names. Cursor reads custom model names from this list
-	// when the OpenAI API key override is enabled.
+	// Add model names (shared for both API styles).
 	existingModels, _ := settings["cursor.general.modelNames"].([]interface{})
 	modelSet := make(map[string]bool)
 	for _, m := range existingModels {

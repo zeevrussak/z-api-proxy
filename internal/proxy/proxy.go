@@ -83,10 +83,17 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	cfg := p.manager.Get()
 
 	// Security: verify the caller's API key matches the configured key.
+	// Accept either OpenAI (Authorization: Bearer) or Anthropic (x-api-key) auth.
 	if cfg.Security.VerifyKey && cfg.Upstream.APIKey != "" {
-		auth := r.Header.Get("Authorization")
-		expected := "Bearer " + cfg.Upstream.APIKey
-		if subtle.ConstantTimeCompare([]byte(auth), []byte(expected)) != 1 {
+		sentKey := ""
+		if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
+			sentKey = strings.TrimPrefix(auth, "Bearer ")
+		}
+		if xk := r.Header.Get("x-api-key"); xk != "" {
+			sentKey = xk
+		}
+		expected := cfg.Upstream.APIKey
+		if subtle.ConstantTimeCompare([]byte(sentKey), []byte(expected)) != 1 {
 			p.counter.IncRejected()
 			http.Error(w, "unauthorized: API key mismatch", http.StatusUnauthorized)
 			return
@@ -128,7 +135,9 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	upReq.ContentLength = int64(len(body))
 
 	if cfg.Upstream.APIKey != "" {
+		// Set both auth headers — harmless to send both, works for OpenAI + Anthropic.
 		upReq.Header.Set("Authorization", "Bearer "+cfg.Upstream.APIKey)
+		upReq.Header.Set("x-api-key", cfg.Upstream.APIKey)
 	}
 
 	log.Printf("%s %s -> %s", r.Method, r.URL.Path, upstreamURL)

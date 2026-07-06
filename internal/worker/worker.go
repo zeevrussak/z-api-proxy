@@ -101,7 +101,9 @@ export default {
 
     // Log every request for debugging (visible in Cloudflare dashboard → Workers → Logs).
     const authHeader = request.headers.get('Authorization') || '';
-    const sentKey = authHeader.replace('Bearer ', '');
+    const xApiKey = request.headers.get('x-api-key') || '';
+    // Accept auth from either OpenAI (Authorization: Bearer) or Anthropic (x-api-key) header.
+    const sentKey = authHeader.replace('Bearer ', '') || xApiKey;
     const sentPrefix = sentKey.substring(0, 12);
 
     // Show which keys are configured (first 8 chars only for security).
@@ -112,7 +114,7 @@ export default {
     console.log('[z-api-proxy]   CURSOR_KEY set: ' + (CURSOR_KEY ? 'yes' : 'no'));
 
     if (url.pathname === '/health') {
-      if (API_KEY && !acceptedKeys.some(k => k && authHeader === 'Bearer ' + k)) {
+      if (API_KEY && !acceptedKeys.some(k => k && sentKey === k)) {
         console.log('[z-api-proxy] health check REJECTED — key mismatch');
         return new Response('unauthorized', { status: 401 });
       }
@@ -167,8 +169,8 @@ export default {
     for (const [key, value] of request.headers.entries()) {
       const lk = key.toLowerCase();
       if (HOP_HEADERS.has(lk)) continue;
-      // Skip Authorization — we set it explicitly below with the real upstream key.
-      if (lk === 'authorization') continue;
+      // Skip auth headers — we set them explicitly below with the real upstream key.
+      if (lk === 'authorization' || lk === 'x-api-key') continue;
       init.headers[key] = value;
     }
 
@@ -191,8 +193,8 @@ export default {
     }
 
     if (API_KEY) {
-      if (!acceptedKeys.some(k => k && authHeader === 'Bearer ' + k)) {
-        console.log('[z-api-proxy] REQUEST REJECTED — invalid API key. Got: ' + authPrefix + '...');
+      if (!acceptedKeys.some(k => k && sentKey === k)) {
+        console.log('[z-api-proxy] REQUEST REJECTED — invalid API key. Got: ' + sentPrefix + '...');
         return new Response(JSON.stringify({
           error: {
             message: 'Invalid API key. The key does not match the Worker API_KEY or CURSOR_KEY secret.',
@@ -205,8 +207,9 @@ export default {
         });
       }
       console.log('[z-api-proxy] request accepted, forwarding to upstream');
-      // Always forward with the real upstream key.
+      // Set both auth headers — works for OpenAI + Anthropic API styles.
       init.headers['Authorization'] = 'Bearer ' + API_KEY;
+      init.headers['x-api-key'] = API_KEY;
     } else {
       console.log('[z-api-proxy] REQUEST REJECTED — no API_KEY secret configured');
       return new Response(JSON.stringify({

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unsafe"
 
 	"github.com/getlantern/systray"
 	"golang.org/x/sys/windows/registry"
@@ -542,7 +543,13 @@ func (t *trayApp) registerModels() {
 		modelNames = append(modelNames, m.From)
 	}
 
-	settingsPath, err := cursorint.RegisterModels(proxyURL, modelNames, cfg.Proxy.CursorKey)
+	// Ask which API mode to configure.
+	mode := askApiMode()
+	if mode == "" {
+		return
+	}
+
+	settingsPath, err := cursorint.RegisterModels(proxyURL, modelNames, cfg.Proxy.CursorKey, mode)
 	if err != nil {
 		log.Printf("register models error: %v", err)
 		messageBox("Failed to register models in Cursor:\n\n"+err.Error(),
@@ -686,4 +693,36 @@ func updateTOMLValue(tomlText, section, key, value string) string {
 	}
 
 	return strings.Join(lines, "\n")
+}
+
+// askApiMode shows a dialog asking which API format to configure in Cursor.
+// Returns "openai", "anthropic", "both", or "" (cancelled).
+func askApiMode() string {
+	// Use a Win32 MessageBox with yes/no/cancel buttons.
+	// IDYES=6 (OpenAI), IDNO=7 (Anthropic), IDCANCEL=2 (Both)
+	const (
+		mbYesNoCancel  uintptr = 0x00000003
+		mbIconQuestion uintptr = 0x00000020
+		mbDefButton4   uintptr = 0x00000300
+	)
+	title, _ := syscall.UTF16PtrFromString("Z-API Proxy — Cursor Setup")
+	text, _ := syscall.UTF16PtrFromString(
+		"Configure Cursor for which API format?\n\n" +
+			"Yes = OpenAI (chat/completions)\n" +
+			"No = Anthropic (messages)\n" +
+			"Cancel = Both")
+	ret, _, _ := procMessageBox.Call(
+		0,
+		uintptr(unsafe.Pointer(text)),
+		uintptr(unsafe.Pointer(title)),
+		uintptr(mbYesNoCancel|mbIconQuestion|mbDefButton4),
+	)
+	switch ret {
+	case 6: // IDYES
+		return "openai"
+	case 7: // IDNO
+		return "anthropic"
+	default: // IDCANCEL or closed
+		return "both"
+	}
 }

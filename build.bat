@@ -9,6 +9,9 @@ setlocal enabledelayedexpansion
 
 :: --- Kill any running instances so we can overwrite the binary ---
 taskkill /f /im z-api-proxy.exe >nul 2>&1
+if %ERRORLEVEL% equ 0 (
+    echo Stopped running z-api-proxy.exe instance.
+)
 
 :: --- Read version from VERSION file ---
 for /f "delims=" %%v in (VERSION) do set VERSION=%%v

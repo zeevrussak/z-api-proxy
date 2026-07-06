@@ -68,6 +68,16 @@ set GOOS=
 set GOARCH=
 echo       Done.
 
+:: --- Build cursor-setup-helper ---
+echo.
+echo [2.5/6] Building cursor-setup-helper...
+go build -ldflags "-X main.version=%VERSION%" -o releases\cursor-setup-helper.exe ./cmd/cursor-setup-helper/
+if %ERRORLEVEL% neq 0 (
+    echo FAILED: cursor-setup-helper build
+    exit /b 1
+)
+echo       cursor-setup-helper.exe
+
 :: --- Build MSIs ---
 echo.
 echo [3/5] Building MSI installers...

@@ -120,6 +120,27 @@ export default {
       return new Response('OK', { status: 200 });
     }
 
+    // Intercept /v1/models — return enhanced model data with context window.
+    // Cursor reads context_length to determine the context window size.
+    if (url.pathname === '/v1/models' || url.pathname === '/models') {
+      const models = [];
+      for (const [cursorName, upstreamName] of FORWARD_MAP) {
+        models.push({
+          id: cursorName,
+          object: 'model',
+          created: 1700000000,
+          owned_by: 'z.ai',
+          context_length: 1048576,
+          max_tokens: 1048576
+        });
+      }
+      const resp = { object: 'list', data: models };
+      return new Response(JSON.stringify(resp), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+
     let upstreamPath = url.pathname.replace(/^\/v1/, '');
     if (!upstreamPath.startsWith('/')) upstreamPath = '/' + upstreamPath;
     const upstreamUrl = UPSTREAM + upstreamPath + url.search;

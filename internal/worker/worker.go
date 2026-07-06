@@ -120,9 +120,11 @@ export default {
     let reqBody = null;
     const init = { method: request.method, headers: {} };
     for (const [key, value] of request.headers.entries()) {
-      if (!HOP_HEADERS.has(key.toLowerCase())) {
-        init.headers[key] = value;
-      }
+      const lk = key.toLowerCase();
+      if (HOP_HEADERS.has(lk)) continue;
+      // Skip Authorization — we set it explicitly below with the real upstream key.
+      if (lk === 'authorization') continue;
+      init.headers[key] = value;
     }
 
     if (request.method === 'POST' || request.method === 'PUT' || request.method === 'PATCH') {

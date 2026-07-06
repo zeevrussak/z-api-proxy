@@ -69,8 +69,6 @@ func GenerateScript(cfg *config.Config) string {
 	fwdJSON, _ := json.Marshal(fwd)
 	revJSON, _ := json.Marshal(rev)
 
-	upstreamURL := strings.TrimSuffix(cfg.Upstream.BaseURL, "/")
-
 	fwdJSONStr := string(fwdJSON)
 	revJSONStr := string(revJSON)
 	return fmt.Sprintf(`// Z-API Proxy Cloudflare Worker
@@ -79,10 +77,13 @@ func GenerateScript(cfg *config.Config) string {
 // ATTRIBUTION: Powered by z-api-proxy by Zeev Russak
 // https://github.com/zeevrussak/z-api-proxy
 // License: Attribution Required — see LICENSE
-const UPSTREAM = '%s';
-
-const FORWARD_MAP = new Map(JSON.parse('%s'));
-const REVERSE_MAP = new Map(JSON.parse('%s'));
+//
+// Configuration is via Cloudflare environment variables:
+//   UPSTREAM        (var)    — z.ai API base URL
+//   MODEL_MAPPINGS  (var)    — JSON array of [from, to] pairs
+//   MODEL_SPECS     (var)    — JSON object of model specs
+//   API_KEY         (secret) — z.ai upstream API key
+//   CURSOR_KEY      (secret) — key Cursor sends (validated, swapped for API_KEY)
 
 const HOP_HEADERS = new Set([
   'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization',
@@ -91,15 +92,19 @@ const HOP_HEADERS = new Set([
 
 export default {
   async fetch(request, env) {
+    // Read configuration from environment variables (set in Cloudflare dashboard).
+    const UPSTREAM = env.UPSTREAM || 'https://api.z.ai/api/coding/paas/v4';
     const API_KEY = env.API_KEY || '';
     const CURSOR_KEY = env.CURSOR_KEY || '';
+    const FORWARD_MAP = new Map(JSON.parse(env.MODEL_MAPPINGS || '%s'));
+    const REVERSE_MAP = new Map(JSON.parse(env.MODEL_REVERSE || '%s'));
     const url = new URL(request.url);
 
     // Build list of accepted keys: real upstream key + optional cursor proxy key.
     const acceptedKeys = [API_KEY];
     if (CURSOR_KEY) acceptedKeys.push(CURSOR_KEY);
 
-    // Log every request for debugging (visible in Cloudflare dashboard → Workers → Logs).
+    // Log every request for debugging.
     const authHeader = request.headers.get('Authorization') || '';
     const xApiKey = request.headers.get('x-api-key') || '';
     // Accept auth from either OpenAI (Authorization: Bearer) or Anthropic (x-api-key) header.
@@ -293,7 +298,7 @@ export default {
     respHeaders.set('Content-Length', new TextEncoder().encode(respBody).length.toString());
     return new Response(respBody, { status: upstreamResp.status, headers: respHeaders });
   }
-};`, upstreamURL, jsEscape(fwdJSONStr), jsEscape(revJSONStr))
+};`, jsEscape(fwdJSONStr), jsEscape(revJSONStr))
 }
 
 // jsEscape makes a JSON string safe for embedding in a JS single-quoted string.
@@ -329,9 +334,35 @@ func Deploy(cfg *config.Config) (*DeployResult, error) {
 	var buf bytes.Buffer
 	w := multipart.NewWriter(&buf)
 
+	// Build model mappings as [from, to] pairs for JSON var.
+	var fwd, rev [][2]string
+	for _, m := range cfg.Models {
+		fwd = append(fwd, [2]string{m.From, m.To})
+		rev = append(rev, [2]string{m.To, m.From})
+	}
+	fwdJSON, _ := json.Marshal(fwd)
+	revJSON, _ := json.Marshal(rev)
+
 	metadata := map[string]interface{}{
 		"main_module":        "worker.js",
 		"compatibility_date": "2024-09-23",
+		"bindings": []map[string]interface{}{
+			{
+				"type":          "plain_text",
+				"name":          "UPSTREAM",
+				"text":          strings.TrimSuffix(cfg.Upstream.BaseURL, "/"),
+			},
+			{
+				"type":          "plain_text",
+				"name":          "MODEL_MAPPINGS",
+				"text":          string(fwdJSON),
+			},
+			{
+				"type":          "plain_text",
+				"name":          "MODEL_REVERSE",
+				"text":          string(revJSON),
+			},
+		},
 	}
 	if cfg.Cloudflare.EnableLogging {
 		metadata["observability"] = map[string]bool{

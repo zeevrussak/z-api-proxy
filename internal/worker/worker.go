@@ -60,11 +60,11 @@ func (r *cfResponse) ErrorString() string {
 
 // GenerateScript builds the Cloudflare Worker JavaScript.
 func GenerateScript(cfg *config.Config) string {
-	type modelPair struct{ From, To string }
-	var fwd, rev []modelPair
+	// Build maps as [key, value] pairs for JS Map constructor.
+	var fwd, rev [][2]string
 	for _, m := range cfg.Models {
-		fwd = append(fwd, modelPair{m.From, m.To})
-		rev = append(rev, modelPair{m.To, m.From})
+		fwd = append(fwd, [2]string{m.From, m.To})
+		rev = append(rev, [2]string{m.To, m.From})
 	}
 	fwdJSON, _ := json.Marshal(fwd)
 	revJSON, _ := json.Marshal(rev)

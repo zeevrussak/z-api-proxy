@@ -100,6 +100,10 @@ func TestGenerateScript_KeyIsolation(t *testing.T) {
 	if !strings.Contains(script, "env.CURSOR_KEY") {
 		t.Error("script must read CURSOR_KEY from env")
 	}
+	// Verify maps are [key,value] pairs, not objects
+	if strings.Contains(script, `"From"`) || strings.Contains(script, `"To"`) {
+		t.Error("script must use [key,value] pairs for Map, not {From,To} objects")
+	}
 }
 
 // TestGenerateScript_AuthorizationSkip verifies the Worker JS skips

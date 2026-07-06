@@ -10,7 +10,6 @@ import (
 	"strings"
 	"syscall"
 	"time"
-	"unsafe"
 
 	"github.com/getlantern/systray"
 	"golang.org/x/sys/windows/registry"
@@ -41,9 +40,7 @@ const (
 )
 
 func messageBox(text, title string, flags uintptr) {
-	t, _ := syscall.UTF16PtrFromString(text)
-	c, _ := syscall.UTF16PtrFromString(title)
-	procMessageBox.Call(0, uintptr(unsafe.Pointer(t)), uintptr(unsafe.Pointer(c)), flags)
+	messageBoxOrFallback(text, title, flags)
 }
 
 // --- Worker URL preference ---

@@ -59,6 +59,10 @@ func RegisterModels(proxyURL string, modelNames []string) (string, error) {
 	// Add the proxy base URL for the OpenAI API override.
 	settings["cursor.general.openaiApiBaseUrl"] = proxyURL
 
+	// Enable the "Override OpenAI Base URL" toggle so Cursor actually
+	// uses the proxy URL instead of routing through its own servers.
+	settings["cursor.general.enableOpenaiApiBaseUrl"] = true
+
 	// Add model names. Cursor reads custom model names from this list
 	// when the OpenAI API key override is enabled.
 	existingModels, _ := settings["cursor.general.modelNames"].([]interface{})

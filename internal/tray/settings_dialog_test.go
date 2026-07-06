@@ -75,8 +75,8 @@ func TestButtonStyleConstants(t *testing.T) {
 	if bsAutocheckbox != 0x0003 {
 		t.Errorf("bsAutocheckbox = 0x%X, want 0x0003", bsAutocheckbox)
 	}
-	if bsAutoradioButton != 0x0004 {
-		t.Errorf("bsAutoradioButton = 0x%X, want 0x0004", bsAutoradioButton)
+	if bsAutoradioButton != 0x0009 {
+		t.Errorf("bsAutoradioButton = 0x%X, want 0x0009", bsAutoradioButton)
 	}
 	if bsCenter != 0x0300 {
 		t.Errorf("bsCenter = 0x%X, want 0x0300", bsCenter)

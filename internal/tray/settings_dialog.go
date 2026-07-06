@@ -50,7 +50,7 @@ const (
 
 	gwlStyle          = ^uintptr(15) // -16 as uintptr (GWL_STYLE)
 	bsAutocheckbox    = 0x00000003
-	bsAutoradioButton = 0x00000004
+	bsAutoradioButton = 0x00000009
 
 	wmSize      = 0x0005
 	wmSetIcon   = 0x0080

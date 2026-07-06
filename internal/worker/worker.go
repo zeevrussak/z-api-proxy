@@ -284,8 +284,12 @@ func Deploy(cfg *config.Config) (*DeployResult, error) {
 	w := multipart.NewWriter(&buf)
 
 	metadata := map[string]interface{}{
-		"main_module":       "worker.js",
+		"main_module":        "worker.js",
 		"compatibility_date": "2024-09-23",
+		"logpush":            true,
+		"observability": map[string]bool{
+			"enabled": true,
+		},
 	}
 	metaJSON, _ := json.Marshal(metadata)
 	_ = w.WriteField("metadata", string(metaJSON))

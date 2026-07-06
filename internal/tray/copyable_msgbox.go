@@ -9,31 +9,33 @@ import (
 )
 
 // copyableMsgBox creates a dialog with a selectable, copyable read-only
-// Edit control instead of the standard MessageBox. This allows the user
-// to select and Ctrl+C the error text.
+// Edit control instead of the standard MessageBox.
 
 var (
 	msgBoxClassAtom uint16
 	msgBoxRegOnce   sync.Once
 	msgBoxShowing   bool
 	msgBoxMu        sync.Mutex
+
+	pAdjustWindowRectEx = user32.NewProc("AdjustWindowRectEx")
+	pGetDpiForWindow    = user32.NewProc("GetDpiForWindow")
+	pGetDpiForSystem    = user32.NewProc("GetDpiForSystem")
 )
 
 const (
-	esReadonly   = 0x0800
-	esMultiline  = 0x0004
+	esReadonly    = 0x0800
+	esMultiline   = 0x0004
 	esAutoVscroll = 0x0040
-	wsHscroll    = 0x00100000
 
 	idMsgText = 3000
 	idMsgOK   = 3001
 )
 
 type msgBoxData struct {
-	hwnd   uintptr
+	hwnd     uintptr
 	hwndText uintptr
 	hwndOK   uintptr
-	flags   uintptr
+	flags    uintptr
 }
 
 var currentMsgBox *msgBoxData
@@ -61,7 +63,7 @@ func msgBoxWndProc(hwnd, msg, wParam, lParam uintptr) uintptr {
 	case wmCommand:
 		ctrlID := wParam & 0xFFFF
 		notif := wParam >> 16
-		if notif == 0 { // BN_CLICKED
+		if notif == 0 {
 			if ctrlID == idMsgOK {
 				pDestroyWindow.Call(hwnd)
 			}
@@ -75,8 +77,16 @@ func msgBoxWndProc(hwnd, msg, wParam, lParam uintptr) uintptr {
 	return ret
 }
 
+// dpiScale returns the DPI scale factor (1.0 = 96 DPI, 1.5 = 144 DPI, etc.)
+func dpiScale() float64 {
+	dpi, _, _ := pGetDpiForSystem.Call()
+	if dpi == 0 {
+		return 1.0
+	}
+	return float64(dpi) / 96.0
+}
+
 // showCopyableMsgBox shows a dialog with selectable text and an OK button.
-// Replaces messageBox for error messages so users can copy error details.
 func showCopyableMsgBox(text, title string, icon uintptr) {
 	msgBoxMu.Lock()
 	if msgBoxShowing {
@@ -96,32 +106,62 @@ func showCopyableMsgBox(text, title string, icon uintptr) {
 
 	ensureMsgBoxClass()
 
-	// Calculate window size based on text length.
+	scale := dpiScale()
+
+	// DPI-aware sizing constants.
+	margin := int(12 * scale)
+	spacing := int(8 * scale)
+	btnH := int(28 * scale)
+	btnW := int(90 * scale)
+	editTop := int(10 * scale)
+
+	// Calculate text area dimensions from content.
 	lines := strings.Count(text, "\n") + 1
 	if lines < 3 {
 		lines = 3
 	}
-	textW := 0
+	lineH := int(16 * scale)
+	maxLineWidth := 0
 	for _, line := range strings.Split(text, "\n") {
-		if len(line) > textW {
-			textW = len(line)
+		w := len(line) * int(7*scale)
+		if w > maxLineWidth {
+			maxLineWidth = w
 		}
 	}
-	winW := textW*7 + 80
-	if winW < 350 {
-		winW = 350
+
+	// Client area dimensions (the area inside the window, excluding title bar/borders).
+	clientW := maxLineWidth + margin*2
+	if clientW < int(320*scale) {
+		clientW = int(320 * scale)
 	}
-	if winW > 700 {
-		winW = 700
-	}
-	winH := lines*16 + 120
-	if winH < 180 {
-		winH = 180
-	}
-	if winH > 500 {
-		winH = 500
+	if clientW > int(650*scale) {
+		clientW = int(650 * scale)
 	}
 
+	textH := lines * lineH
+	if textH > int(300*scale) {
+		textH = int(300 * scale)
+	}
+
+	bottomArea := btnH + spacing*2 // button row + padding above and below
+	clientH := editTop + textH + bottomArea
+	if clientH < int(150*scale) {
+		clientH = int(150 * scale)
+	}
+
+	// Calculate window rect from client rect (adds title bar + borders).
+	rect := struct{ Left, Top, Right, Bottom int32 }{
+		0, 0, int32(clientW), int32(clientH),
+	}
+	style := wsCaption | wsSysMenu
+	pAdjustWindowRectEx.Call(
+		uintptr(unsafe.Pointer(&rect)),
+		uintptr(style), 0, 0,
+	)
+	winW := int(rect.Right - rect.Left)
+	winH := int(rect.Bottom - rect.Top)
+
+	// Center on screen.
 	sw, _, _ := pGetSystemMetrics.Call(0)
 	sh, _, _ := pGetSystemMetrics.Call(1)
 	x := int32((int(sw) - winW) / 2)
@@ -133,7 +173,7 @@ func showCopyableMsgBox(text, title string, icon uintptr) {
 		wsExControlParent,
 		uintptr(msgBoxClassAtom),
 		uintptr(unsafe.Pointer(titlePtr)),
-		uintptr(wsCaption|wsSysMenu),
+		uintptr(style),
 		uintptr(x), uintptr(y), uintptr(winW), uintptr(winH),
 		0, 0, 0, 0,
 	)
@@ -149,10 +189,7 @@ func showCopyableMsgBox(text, title string, icon uintptr) {
 		pSendMessageW.Call(hwnd, wmSetIcon, 0, hSmallIcon)
 	}
 
-	mx := 15
-	textH := winH - 70
-
-	// Read-only multiline Edit control — selectable and copyable.
+	// Edit control — read-only multiline, selectable.
 	editClass, _ := syscall.UTF16PtrFromString("Edit")
 	textPtr, _ := syscall.UTF16PtrFromString(text)
 	hwndText, _, _ := pCreateWindowExW.Call(
@@ -160,22 +197,22 @@ func showCopyableMsgBox(text, title string, icon uintptr) {
 		uintptr(unsafe.Pointer(editClass)),
 		uintptr(unsafe.Pointer(textPtr)),
 		uintptr(wsChild|wsVisible|esMultiline|esAutoVscroll|esAutohscroll|esReadonly|wsVscroll|wsBorder),
-		uintptr(mx), uintptr(10), uintptr(winW-mx*2), uintptr(textH),
+		uintptr(margin), uintptr(editTop), uintptr(clientW-margin*2), uintptr(textH),
 		hwnd, idMsgText, 0, 0,
 	)
 	pSendMessageW.Call(hwndText, wmSetFont, fontHandle, 1)
 
-	// OK button.
+	// OK button — centered horizontally, below the edit with padding.
 	btnClass, _ := syscall.UTF16PtrFromString("Button")
 	okLabel, _ := syscall.UTF16PtrFromString("OK")
-	btnW := 90
-	okX := (winW - btnW) / 2
+	btnX := (clientW - btnW) / 2
+	btnY := editTop + textH + spacing
 	hwndOK, _, _ := pCreateWindowExW.Call(
 		0,
 		uintptr(unsafe.Pointer(btnClass)),
 		uintptr(unsafe.Pointer(okLabel)),
 		uintptr(wsChild|wsVisible|bsCenter|wsTabstop),
-		uintptr(okX), uintptr(textH+15), uintptr(btnW), 30,
+		uintptr(btnX), uintptr(btnY), uintptr(btnW), uintptr(btnH),
 		hwnd, idMsgOK, 0, 0,
 	)
 	pSendMessageW.Call(hwndOK, wmSetFont, fontHandle, 1)
@@ -204,9 +241,6 @@ func showCopyableMsgBox(text, title string, icon uintptr) {
 	}
 }
 
-// messageBoxOrFallback tries the copyable dialog first, falls back to
-// Win32 MessageBox if the custom dialog fails to create.
 func messageBoxOrFallback(text, title string, icon uintptr) {
-	// Use copyable dialog for all messages.
 	showCopyableMsgBox(text, title, icon)
 }

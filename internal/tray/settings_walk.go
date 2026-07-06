@@ -93,7 +93,7 @@ func showSettingsDialogWalkWithHandle(cfg *config.Config, configPath string, dlg
 		Layout:   VBox{Margins: Margins{Left: 10, Top: 10, Right: 10, Bottom: 5}, Spacing: 6},
 		Children: []Widget{
 			ScrollView{
-				Layout: VBox{Spacing: 6, MarginsZero: true},
+				Layout: VBox{Spacing: 6, Margins: Margins{Left: 0, Top: 0, Right: 20, Bottom: 0}},
 				Children: []Widget{
 					GroupBox{
 						Title:  "Server",
@@ -238,7 +238,7 @@ func showSettingsDialogWalk(cfg *config.Config, configPath string) {
 		Layout:   VBox{Margins: Margins{Left: 10, Top: 10, Right: 10, Bottom: 5}, Spacing: 6},
 		Children: []Widget{
 			ScrollView{
-				Layout: VBox{Spacing: 6, MarginsZero: true},
+				Layout: VBox{Spacing: 6, Margins: Margins{Left: 0, Top: 0, Right: 20, Bottom: 0}},
 				Children: []Widget{
 					// ── Server ──
 					GroupBox{

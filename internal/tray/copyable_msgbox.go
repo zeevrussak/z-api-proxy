@@ -106,6 +106,10 @@ func showCopyableMsgBox(text, title string, icon uintptr) {
 
 	ensureMsgBoxClass()
 
+	// Convert \n to \r\n for Win32 Edit control line breaks.
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\n", "\r\n")
+
 	scale := dpiScale()
 
 	// DPI-aware sizing constants.

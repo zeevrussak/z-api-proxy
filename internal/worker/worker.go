@@ -99,11 +99,17 @@ export default {
     const acceptedKeys = [API_KEY];
     if (CURSOR_KEY) acceptedKeys.push(CURSOR_KEY);
 
+    // Log every request for debugging (visible in Cloudflare dashboard → Workers → Logs).
+    const authHeader = request.headers.get('Authorization') || '';
+    const authPrefix = authHeader.substring(0, 20);
+    console.log('[z-api-proxy] ' + request.method + ' ' + url.pathname + ' | auth=' + (authPrefix ? authPrefix + '...' : 'NONE'));
+
     if (url.pathname === '/health') {
-      const auth = request.headers.get('Authorization') || '';
-      if (API_KEY && !acceptedKeys.some(k => k && auth === 'Bearer ' + k)) {
+      if (API_KEY && !acceptedKeys.some(k => k && authHeader === 'Bearer ' + k)) {
+        console.log('[z-api-proxy] health check REJECTED — key mismatch');
         return new Response('unauthorized', { status: 401 });
       }
+      console.log('[z-api-proxy] health check OK');
       return new Response('OK', { status: 200 });
     }
 
@@ -129,14 +135,33 @@ export default {
     }
 
     if (API_KEY) {
-      const auth = request.headers.get('Authorization') || '';
-      if (!acceptedKeys.some(k => k && auth === 'Bearer ' + k)) {
-        return new Response('unauthorized: invalid API key', { status: 401 });
+      if (!acceptedKeys.some(k => k && authHeader === 'Bearer ' + k)) {
+        console.log('[z-api-proxy] REQUEST REJECTED — invalid API key. Got: ' + authPrefix + '...');
+        return new Response(JSON.stringify({
+          error: {
+            message: 'Invalid API key. The key does not match the Worker API_KEY or CURSOR_KEY secret.',
+            type: 'invalid_request_error',
+            code: 'invalid_api_key'
+          }
+        }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/json' }
+        });
       }
+      console.log('[z-api-proxy] request accepted, forwarding to upstream');
       // Always forward with the real upstream key.
       init.headers['Authorization'] = 'Bearer ' + API_KEY;
     } else {
-      return new Response('unauthorized: no upstream API key configured', { status: 401 });
+      console.log('[z-api-proxy] REQUEST REJECTED — no API_KEY secret configured');
+      return new Response(JSON.stringify({
+        error: {
+          message: 'Worker has no upstream API key configured.',
+          type: 'invalid_request_error'
+        }
+      }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' }
+      });
     }
 
     const upstreamReq = new Request(upstreamUrl, init);

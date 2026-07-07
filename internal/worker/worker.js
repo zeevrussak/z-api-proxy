@@ -119,9 +119,13 @@ export default {
     // /v1/models is public — returns capabilities without auth.
     if (url.pathname === '/v1/models' || url.pathname === '/models') {
       const MODEL_SPECS = {
-        'z.ai/gielem52/1M':    { ctx: 1048576, maxOut: 131072 },
-        'z.ai/glm-5.2/200k':  { ctx: 200000,  maxOut: 131072 },
-        'z.ai/glm-5.1/1M':    { ctx: 1048576, maxOut: 131072 },
+        'z.ai/gielem52/1M/max':    { ctx: 1048576, maxOut: 131072 },
+        'z.ai/gielem52/1M/high':   { ctx: 1048576, maxOut: 131072 },
+        'z.ai/gielem52/1M/fast':   { ctx: 1048576, maxOut: 131072 },
+        'z.ai/glm-5.2/200k/max':   { ctx: 200000,  maxOut: 131072 },
+        'z.ai/glm-5.2/200k/fast':  { ctx: 200000,  maxOut: 131072 },
+        'z.ai/glm-5.1/1M/max':     { ctx: 1048576, maxOut: 131072 },
+        'z.ai/glm-5.1/1M/fast':    { ctx: 1048576, maxOut: 131072 },
         'z.ai/glm-5':         { ctx: 131072,  maxOut: 131072 },
         'z.ai/glm-5-turbo':   { ctx: 131072,  maxOut: 131072 },
         'z.ai/glm-5v-turbo':  { ctx: 131072,  maxOut: 131072 },
@@ -162,10 +166,37 @@ export default {
 
     if (request.method === 'POST' || request.method === 'PUT' || request.method === 'PATCH') {
       reqBody = await request.text();
+      let effort = '';
       for (const [from, to] of FORWARD_MAP) {
-        reqBody = reqBody.replaceAll('"model":"' + from + '"', '"model":"' + to + '"');
-        reqBody = reqBody.replaceAll('"model": "' + from + '"', '"model": "' + to + '"');
+        const pipe = to.indexOf('|');
+        const upstreamModel = pipe >= 0 ? to.substring(0, pipe) : to;
+        const modelEffort = pipe >= 0 ? to.substring(pipe + 1) : '';
+
+        const old1 = '"model":"' + from + '"';
+        const old2 = '"model": "' + from + '"';
+        const newModel = '"model":"' + upstreamModel + '"';
+
+        if (reqBody.includes(old1) || reqBody.includes(old2)) {
+          reqBody = reqBody.replaceAll(old1, newModel);
+          reqBody = reqBody.replaceAll(old2, '"model": "' + upstreamModel + '"');
+          if (modelEffort) effort = modelEffort;
+        }
       }
+
+      // Inject reasoning_effort + thinking if specified.
+      if (effort) {
+        const lastBrace = reqBody.lastIndexOf('}');
+        if (lastBrace > 0) {
+          let inject = ',"reasoning_effort":"' + effort + '"';
+          if (effort === 'none') {
+            inject += ',"thinking":{"type":"disabled"}';
+          } else {
+            inject += ',"thinking":{"type":"enabled"}';
+          }
+          reqBody = reqBody.substring(0, lastBrace) + inject + reqBody.substring(lastBrace);
+        }
+      }
+
       init.body = reqBody;
     }
 

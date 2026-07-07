@@ -201,8 +201,8 @@ func TestCreateDefault(t *testing.T) {
 	if cfg.Server.Listen != "127.0.0.1:8787" {
 		t.Errorf("Listen = %q, want 127.0.0.1:8787", cfg.Server.Listen)
 	}
-	if len(cfg.Models) != 15 {
-		t.Fatalf("Models length = %d, want 15", len(cfg.Models))
+	if len(cfg.Models) != 19 {
+		t.Fatalf("Models length = %d, want 19", len(cfg.Models))
 	}
 	// config.toml should NOT contain api_key anymore
 	if cfg.Upstream.APIKey != "" {

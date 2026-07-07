@@ -233,18 +233,39 @@ worker_name = "z-api-proxy"
 # overrides the context window returned by /v1/models with its own values.
 # Obfuscated names force Cursor to use our /v1/models context_length.
 
-# GLM-5 family
-[[models]]
-from = "z.ai/gielem52/1M"
-to = "glm-5.2"
+# GLM-5 family with reasoning effort variants.
+# /max = deep reasoning, /high = faster reasoning, /fast = no thinking.
+# Only models that support reasoning_effort get variants.
+# IMPORTANT: Use obfuscated cursor-facing names (z.ai/gielem52/1M) for 1M
+# context variants — Cursor overrides known model context windows.
 
 [[models]]
-from = "z.ai/glm-5.2/200k"
-to = "glm-5.2"
+from = "z.ai/gielem52/1M/max"
+to = "glm-5.2|max"
 
 [[models]]
-from = "z.ai/glm-5.1/1M"
-to = "glm-5.1"
+from = "z.ai/gielem52/1M/high"
+to = "glm-5.2|high"
+
+[[models]]
+from = "z.ai/gielem52/1M/fast"
+to = "glm-5.2|none"
+
+[[models]]
+from = "z.ai/glm-5.2/200k/max"
+to = "glm-5.2|max"
+
+[[models]]
+from = "z.ai/glm-5.2/200k/fast"
+to = "glm-5.2|none"
+
+[[models]]
+from = "z.ai/glm-5.1/1M/max"
+to = "glm-5.1|max"
+
+[[models]]
+from = "z.ai/glm-5.1/1M/fast"
+to = "glm-5.1|none"
 
 [[models]]
 from = "z.ai/glm-5"

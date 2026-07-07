@@ -313,14 +313,14 @@ func TestGenerateScript_ModelSpecsGLM52(t *testing.T) {
 			APIKey:  "test-key",
 		},
 		Models: []config.ModelMapping{
-			{From: "z.ai/glm-5.2", To: "glm-5.2"},
+			{From: "z.ai/gielem52/1M/max", To: "glm-5.2|max"},
 		},
 	}
 	script := GenerateScript(cfg)
 
 	// JS now keys MODEL_SPECS by cursor-facing name.
-	if !strings.Contains(script, "z.ai/gielem52/1M") {
-		t.Error("script missing z.ai/gielem52/1M in MODEL_SPECS")
+	if !strings.Contains(script, "z.ai/gielem52/1M/max") {
+		t.Error("script missing z.ai/gielem52/1M/max in MODEL_SPECS")
 	}
 	if !strings.Contains(script, "ctx: 1048576") {
 		t.Error("script missing 1M context in glm-5.2 spec")

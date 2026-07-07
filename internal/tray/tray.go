@@ -558,35 +558,35 @@ func (t *trayApp) deployWorker(mCopyURL *systray.MenuItem) {
 		return
 	}
 
-	result, err := worker.Deploy(cfg)
-	if err != nil {
-		log.Printf("worker deploy error: %v", err)
-		messageBox("Failed to deploy Worker:\n\n"+err.Error(), "Z-API Proxy — Worker", mbIconError)
-		return
-	}
+	showProcessDialog("Z-API Proxy — Deploying Worker", "Uploading script to Cloudflare", func(progress func(string)) ProcessResult {
+		progress("Uploading Worker script...")
+		result, err := worker.Deploy(cfg)
+		if err != nil {
+			log.Printf("worker deploy error: %v", err)
+			return ProcessResult{
+				Success: false,
+				Title:   "Z-API Proxy — Deploy Failed",
+				Summary: "Failed to deploy Worker:\n" + err.Error(),
+			}
+		}
 
-	log.Printf("worker deployed: %s", result.URL)
+		log.Printf("worker deployed: %s", result.URL)
 
-	// Persist the Worker URL so it's used by default on every launch.
-	saveWorkerURL(result.URL)
-	mCopyURL.SetTitle("Copy Worker URL")
+		saveWorkerURL(result.URL)
+		mCopyURL.SetTitle("Copy Worker URL")
 
-	// If the tunnel is running, stop it — the Worker replaces it.
-	if t.tunnel.Running() {
-		t.tunnel.Stop()
-		saveTunnelPref(false)
-		mTunnel := mCopyURL // not ideal but tunnel item not in scope
-		_ = mTunnel
-	}
+		if t.tunnel.Running() {
+			progress("Stopping tunnel (Worker replaces it)...")
+			t.tunnel.Stop()
+			saveTunnelPref(false)
+		}
 
-	messageBox(
-		fmt.Sprintf("Cloudflare Worker deployed successfully!\n\n"+
-			"URL: %s/v1\n\n"+
-			"This is a stable URL — it won't change on restart.\n"+
-			"Use it in Cursor:\n"+
-			"Settings \u2192 Models \u2192 OpenAI API Base URL",
-			result.URL),
-		"Z-API Proxy — Worker", mbIconInfo)
+		return ProcessResult{
+			Success: true,
+			Title:   "Z-API Proxy — Worker Deployed",
+			Summary: formatDeploySummary(result.URL, cfg.Cloudflare.WorkerHostname),
+		}
+	})
 }
 
 // registerModels adds all configured z.ai model names into Cursor's
@@ -610,28 +610,34 @@ func (t *trayApp) registerModels() {
 		modelNames = append(modelNames, m.From)
 	}
 
-	settingsPath, err := cursorint.RegisterModels(proxyURL, modelNames, cfg.Proxy.CursorKey, cfg.Proxy.ClientID)
-	if err != nil {
-		log.Printf("register models error: %v", err)
-		messageBox("Failed to register models in Cursor:\n\n"+err.Error(),
-			"Z-API Proxy — Register", mbIconError)
-		return
-	}
+	showProcessDialog("Z-API Proxy — Registering Models", "Writing settings to Cursor", func(progress func(string)) ProcessResult {
+		progress("Checking Cursor is closed...")
+		if cursorint.IsRunning() {
+			return ProcessResult{
+				Success: false,
+				Title:   "Z-API Proxy — Register Failed",
+				Summary: "Cursor is running. Close it completely and try again.",
+			}
+		}
 
-	log.Printf("models registered in Cursor: %s (%d models)", settingsPath, len(modelNames))
+		progress("Writing model names to settings.json and state.vscdb...")
+		settingsPath, err := cursorint.RegisterModels(proxyURL, modelNames, cfg.Proxy.CursorKey, cfg.Proxy.ClientID)
+		if err != nil {
+			log.Printf("register models error: %v", err)
+			return ProcessResult{
+				Success: false,
+				Title:   "Z-API Proxy — Register Failed",
+				Summary: err.Error(),
+			}
+		}
 
-	messageBox(
-		fmt.Sprintf("Models registered in Cursor!\n\n"+
-			"Settings file: %s\n\n"+
-			"Base URL: %s\n"+
-			"Models: %d z.ai GLM models added\n\n"+
-			"Next steps:\n"+
-			"1. Restart Cursor\n"+
-			"2. Go to Settings \u2192 Models\n"+
-			"3. Enter your z.ai API key\n"+
-			"4. Select a z.ai model (e.g. z.ai/glm-5.2)",
-			settingsPath, proxyURL, len(modelNames)),
-		"Z-API Proxy — Register", mbIconInfo)
+		log.Printf("models registered in Cursor: %s (%d models)", settingsPath, len(modelNames))
+		return ProcessResult{
+			Success: true,
+			Title:   "Z-API Proxy — Models Registered",
+			Summary: formatRegisterSummary(settingsPath, len(modelNames)),
+		}
+	})
 }
 
 // createNamedTunnel sets up a fixed-domain Cloudflare tunnel via the API.

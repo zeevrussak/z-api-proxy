@@ -219,7 +219,7 @@ from = "z.ai/gielem52/1M"
 to = "glm-5.2"
 
 [[models]]
-from = "z.ai/gielem52/200k"
+from = "z.ai/glm-5.2/200k"
 to = "glm-5.2"
 
 [[models]]

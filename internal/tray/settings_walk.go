@@ -169,7 +169,7 @@ func showSettingsDialogWalkWithHandle(cfg *config.Config, configPath string, dlg
 								Children: []Widget{
 									PushButton{Text: "Add"},
 									PushButton{Text: "Remove"},
-									PushButton{Text: "Reset to Default", OnClicked: func() {
+									PushButton{Text: "Reset Mappings", OnClicked: func() {
 										models = config.DefaultModelMappings()
 										modelStrings = buildModelStrings(models)
 										modelsLB.SetModel(modelStrings)
@@ -363,15 +363,20 @@ func showSettingsDialogWalk(cfg *config.Config, configPath string) {
 											From: "z.ai/new-model", To: "new-model",
 										})
 										modelStrings = buildModelStrings(models)
-modelsLB.SetModel(modelStrings)
+										modelsLB.SetModel(modelStrings)
 									}},
 									PushButton{Text: "Remove", OnClicked: func() {
 										i := modelsLB.CurrentIndex()
 										if i >= 0 && i < len(models) {
 											models = append(models[:i], models[i+1:]...)
 											modelStrings = buildModelStrings(models)
-modelsLB.SetModel(modelStrings)
+											modelsLB.SetModel(modelStrings)
 										}
+									}},
+									PushButton{Text: "Reset Mappings", OnClicked: func() {
+										models = config.DefaultModelMappings()
+										modelStrings = buildModelStrings(models)
+										modelsLB.SetModel(modelStrings)
 									}},
 								},
 							},

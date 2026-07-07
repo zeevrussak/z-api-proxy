@@ -33,8 +33,9 @@ set VERSION=!BASEVER!+!BUILD!
 echo !VERSION!>VERSION
 echo   Version: !VERSION! ^(build !BUILD!^)
 
-:: --- Derive numeric MSI version (strip pre-release suffix) ---
-for /f "tokens=1 delims=-" %%a in ("%VERSION%") do set MSIVER=%%a
+:: --- Derive numeric MSI version (strip build suffix) ---
+:: MSIVER must be pure x.y.z numeric for WiX. Strip +N suffix.
+for /f "tokens=1 delims=+" %%a in ("%BASEVER%") do set MSIVER=%%a
 
 echo ============================================================
 echo   z-api-proxy release build

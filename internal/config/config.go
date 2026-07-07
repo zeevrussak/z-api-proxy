@@ -107,6 +107,39 @@ type WorkerStatsConfig struct {
 	Interval int  `toml:"interval_seconds"` // poll interval, default 60
 }
 
+// DefaultModelMappings returns the canonical model list with reasoning
+// effort variants. Used by CreateDefault and the Settings "Reset" button.
+func DefaultModelMappings() []ModelMapping {
+	return []ModelMapping{
+		// GLM-5.2 (1M context, obfuscated name to bypass Cursor override)
+		{From: "z.ai/gielem52/1M/max", To: "glm-5.2|max"},
+		{From: "z.ai/gielem52/1M/high", To: "glm-5.2|high"},
+		{From: "z.ai/gielem52/1M/fast", To: "glm-5.2|none"},
+		// GLM-5.2 (200K context, known name — Cursor default)
+		{From: "z.ai/glm-5.2/200k/max", To: "glm-5.2|max"},
+		{From: "z.ai/glm-5.2/200k/fast", To: "glm-5.2|none"},
+		// GLM-5.1 (no 1M support)
+		{From: "z.ai/glm-5.1/max", To: "glm-5.1|max"},
+		{From: "z.ai/glm-5.1/fast", To: "glm-5.1|none"},
+		// GLM-5 family (standard)
+		{From: "z.ai/glm-5", To: "glm-5"},
+		{From: "z.ai/glm-5-turbo", To: "glm-5-turbo"},
+		{From: "z.ai/glm-5v-turbo", To: "glm-5v-turbo"},
+		// GLM-4.7 family
+		{From: "z.ai/glm-4.7", To: "glm-4.7"},
+		{From: "z.ai/glm-4.7-flash", To: "glm-4.7-flash"},
+		{From: "z.ai/glm-4.7-flashx", To: "glm-4.7-flashx"},
+		// GLM-4.6 family
+		{From: "z.ai/glm-4.6", To: "glm-4.6"},
+		{From: "z.ai/glm-4.6v", To: "glm-4.6v"},
+		// GLM-4.5 family
+		{From: "z.ai/glm-4.5", To: "glm-4.5"},
+		{From: "z.ai/glm-4.5-air", To: "glm-4.5-air"},
+		{From: "z.ai/glm-4.5-flash", To: "glm-4.5-flash"},
+		{From: "z.ai/glm-4.5v", To: "glm-4.5v"},
+	}
+}
+
 // ModelMapping defines a single bidirectional model-names translation.
 type ModelMapping struct {
 	From string `toml:"from"`

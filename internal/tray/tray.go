@@ -223,21 +223,30 @@ func (t *trayApp) onReady() {
 
 	systray.AddSeparator()
 
+	// Configuration
 	mConfig := systray.AddMenuItem("Settings...", "Open the settings form")
 	mConfigRaw := systray.AddMenuItem("Edit Config (Raw)", "Open config.toml in Notepad")
-	mTest := systray.AddMenuItem("Test Connection", "Test upstream reachability")
-	mCopyURL := systray.AddMenuItem("Copy Base URL", "Copy the proxy base URL for Cursor")
-	mTunnel := systray.AddMenuItem("Start Public Tunnel", "Expose proxy on a public URL for Cursor")
-	mWorker := systray.AddMenuItem("Deploy Cloudflare Worker", "Deploy a stable Worker proxy to your Cloudflare account")
-	mCreateTunnel := systray.AddMenuItem("Create Named Tunnel", "Set up a fixed-domain tunnel via Cloudflare API")
-	mRegister := systray.AddMenuItem("Register Models in Cursor", "Add all z.ai models to Cursor and config.toml")
-	mStartup := systray.AddMenuItemCheckbox("Start with Windows", "Launch Z-API Proxy when Windows starts", startupPref)
 
 	systray.AddSeparator()
 
+	// Connection
+	mTest := systray.AddMenuItem("Test Connection", "Test upstream reachability")
+	mCopyURL := systray.AddMenuItem("Copy Base URL", "Copy the proxy base URL for Cursor")
+	mRegister := systray.AddMenuItem("Register Models in Cursor", "Add all z.ai models to Cursor")
+
+	systray.AddSeparator()
+
+	// Deployment
+	mTunnel := systray.AddMenuItem("Start Public Tunnel", "Expose proxy on a public URL for Cursor")
+	mWorker := systray.AddMenuItem("Deploy Cloudflare Worker", "Deploy a stable Worker proxy to your Cloudflare account")
+	mCreateTunnel := systray.AddMenuItem("Create Named Tunnel", "Set up a fixed-domain tunnel via Cloudflare API")
+
+	systray.AddSeparator()
+
+	// System
+	mStartup := systray.AddMenuItemCheckbox("Start with Windows", "Launch Z-API Proxy when Windows starts", startupPref)
 	mUpdate := systray.AddMenuItem("Update", "Check for updates")
 	mUpdate.Hide()
-
 	mContact := systray.AddMenuItem("Contact Developer", "Send an email to the developer")
 
 	systray.AddSeparator()

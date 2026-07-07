@@ -169,6 +169,11 @@ func showSettingsDialogWalkWithHandle(cfg *config.Config, configPath string, dlg
 								Children: []Widget{
 									PushButton{Text: "Add"},
 									PushButton{Text: "Remove"},
+									PushButton{Text: "Reset to Default", OnClicked: func() {
+										models = config.DefaultModelMappings()
+										modelStrings = buildModelStrings(models)
+										modelsLB.SetModel(modelStrings)
+									}},
 								},
 							},
 						},

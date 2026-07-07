@@ -21,21 +21,20 @@ if "%VERSION%"=="" (
     exit /b 1
 )
 
-:: --- Parse and increment build number ---
-:: VERSION format: 1.0.0-alpha+N
-for /f "tokens=1,2 delims=+" %%a in ("%VERSION%") do (
-    set BASEVER=%%a
-    set BUILD=%%b
+:: --- Increment patch version (x.y.z → x.y.z+1) ---
+for /f "tokens=1,2,3 delims=." %%a in ("%VERSION%") do (
+    set MAJOR=%%a
+    set MINOR=%%b
+    set PATCH=%%c
 )
-if "!BUILD!"=="" set BUILD=0
-set /a BUILD+=1
-set VERSION=!BASEVER!+!BUILD!
+if "!PATCH!"=="" set PATCH=0
+set /a PATCH+=1
+set VERSION=!MAJOR!.!MINOR!.!PATCH!
 echo !VERSION!>VERSION
-echo   Version: !VERSION! ^(build !BUILD!^)
+echo   Version: !VERSION!
 
-:: --- Derive numeric MSI version (strip build suffix) ---
-:: MSIVER must be pure x.y.z numeric for WiX. Strip +N suffix.
-for /f "tokens=1 delims=+" %%a in ("%BASEVER%") do set MSIVER=%%a
+:: --- MSI version is the same (pure numeric x.y.z) ---
+set MSIVER=!VERSION!
 
 echo ============================================================
 echo   z-api-proxy release build

@@ -10,6 +10,36 @@
 //   MODEL_REVERSE    (var)    — JSON: [["glm-5.2","z.ai/glm-5.2"], ...]
 //   API_KEY          (secret) — z.ai upstream API key
 //   CURSOR_KEY       (secret) — key Cursor sends (validated, swapped for API_KEY)
+//   TEST_KEY         (secret) — built-in test key for deployment verification
+
+// Stats are stored in a global Map (resets on Worker restart, but survives
+// across requests within the same isolate lifetime).
+const _stats = {};
+
+function matchKey(sentKey, expectedKey) {
+  if (!sentKey || !expectedKey) return { ok: false, clientId: '' };
+  if (sentKey === expectedKey) return { ok: true, clientId: '' };
+  if (sentKey.startsWith(expectedKey + '_')) {
+    return { ok: true, clientId: sentKey.substring(expectedKey.length + 1) };
+  }
+  return { ok: false, clientId: '' };
+}
+
+function matchAnyKey(sentKey, keys) {
+  for (const k of keys) {
+    if (!k) continue;
+    const m = matchKey(sentKey, k);
+    if (m.ok) return m;
+  }
+  return { ok: false, clientId: '' };
+}
+
+function recordStats(clientId) {
+  const id = clientId || 'unknown';
+  if (!_stats[id]) _stats[id] = { requests: 0, tokens: 0, lastSeen: '' };
+  _stats[id].requests++;
+  _stats[id].lastSeen = new Date().toISOString();
+}
 
 const HOP_HEADERS = new Set([
   'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization',
@@ -33,10 +63,7 @@ export default {
     const sentKey = authHeader.replace('Bearer ', '') || xApiKey;
     const sentPrefix = sentKey.substring(0, 12);
 
-    const keyHints = acceptedKeys.filter(k => k).map(k => k.substring(0, 8) + '...');
-    console.log('[z-api-proxy] ' + request.method + ' ' + url.pathname);
-    console.log('[z-api-proxy]   received key: ' + (sentPrefix ? sentPrefix + '...' : 'NONE'));
-    console.log('[z-api-proxy]   accepted keys: [' + keyHints.join(', ') + ']');
+    console.log('[z-api-proxy] ' + request.method + ' ' + url.pathname + ' key=' + (sentPrefix ? sentPrefix + '...' : 'NONE'));
 
     // /health is public — just a liveness check.
     if (url.pathname === '/health') {
@@ -44,39 +71,52 @@ export default {
     }
 
     const TEST_KEY = env.TEST_KEY || '';
+    const allKeys = [...acceptedKeys];
+    if (TEST_KEY) allKeys.push(TEST_KEY);
 
-    // /test endpoint: validates any accepted key including the test key.
-    // Returns OK with which key was matched. Used by deployment tests.
+    // /test endpoint: prefix-matches any accepted key.
     if (url.pathname === '/test') {
-      if (TEST_KEY && sentKey === TEST_KEY) {
+      const m = matchAnyKey(sentKey, allKeys);
+      if (m.ok) {
         return new Response(JSON.stringify({
           status: 'OK',
-          matched: 'TEST_KEY',
-          method: request.method,
-          path: url.pathname
-        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
-      }
-      if (API_KEY && sentKey === API_KEY) {
-        return new Response(JSON.stringify({
-          status: 'OK',
-          matched: 'API_KEY'
-        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
-      }
-      if (CURSOR_KEY && sentKey === CURSOR_KEY) {
-        return new Response(JSON.stringify({
-          status: 'OK',
-          matched: 'CURSOR_KEY'
+          matched: sentKey === TEST_KEY ? 'TEST_KEY' : 'ACCEPTED',
+          clientId: m.clientId || ''
         }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       }
       return new Response(JSON.stringify({
         status: 'FAIL',
-        message: 'No matching key found',
+        message: 'No matching key',
         received: sentPrefix ? sentPrefix + '...' : 'NONE'
       }), { status: 401, headers: { 'Content-Type': 'application/json' } });
     }
 
+    // /stats endpoint: returns per-client usage stats as JSON.
+    // Requires any valid key. Client ID extracted from key prefix.
+    if (url.pathname === '/stats') {
+      const m = matchAnyKey(sentKey, allKeys);
+      if (!m.ok) {
+        return new Response(JSON.stringify({ error: 'unauthorized' }), {
+          status: 401, headers: { 'Content-Type': 'application/json' }
+        });
+      }
+      const showAll = url.searchParams.get('all') === 'true';
+      if (showAll) {
+        const arr = Object.entries(_stats).map(([client, s]) => ({
+          client, requests: s.requests, tokens: s.tokens, lastSeen: s.lastSeen
+        }));
+        return new Response(JSON.stringify(arr), {
+          status: 200, headers: { 'Content-Type': 'application/json' }
+        });
+      }
+      const id = m.clientId || 'unknown';
+      const s = _stats[id] || { requests: 0, tokens: 0, lastSeen: '' };
+      return new Response(JSON.stringify({
+        client: id, requests: s.requests, tokens: s.tokens, lastSeen: s.lastSeen
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+
     // /v1/models is public — returns capabilities without auth.
-    // Cursor reads context_length and max_tokens from here.
     if (url.pathname === '/v1/models' || url.pathname === '/models') {
       const MODEL_SPECS = {
         'z.ai/gielem52/1M':    { ctx: 1048576, maxOut: 131072 },
@@ -99,28 +139,18 @@ export default {
       for (const [cursorName, upstreamName] of FORWARD_MAP) {
         const spec = MODEL_SPECS[cursorName] || { ctx: 131072, maxOut: 65536 };
         models.push({
-          id: cursorName,
-          object: 'model',
-          created: 1700000000,
-          owned_by: 'z.ai',
-          context_length: spec.ctx,
-          max_context_length: spec.ctx,
-          context_window: spec.ctx,
-          max_input_tokens: spec.ctx,
-          max_tokens: spec.maxOut,
-          max_output_tokens: spec.maxOut
+          id: cursorName, object: 'model', created: 1700000000, owned_by: 'z.ai',
+          context_length: spec.ctx, max_context_length: spec.ctx,
+          context_window: spec.ctx, max_input_tokens: spec.ctx,
+          max_tokens: spec.maxOut, max_output_tokens: spec.maxOut
         });
       }
       return new Response(JSON.stringify({ object: 'list', data: models }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' }
+        status: 200, headers: { 'Content-Type': 'application/json' }
       });
     }
 
-    let upstreamPath = url.pathname.replace(/^\/v1/, '');
-    if (!upstreamPath.startsWith('/')) upstreamPath = '/' + upstreamPath;
-    const upstreamUrl = UPSTREAM + upstreamPath + url.search;
-
+    // Main request flow — prefix-match keys, extract client ID.
     let reqBody = null;
     const init = { method: request.method, headers: {} };
     for (const [key, value] of request.headers.entries()) {
@@ -132,36 +162,23 @@ export default {
 
     if (request.method === 'POST' || request.method === 'PUT' || request.method === 'PATCH') {
       reqBody = await request.text();
-      const modelMatch = reqBody.match(/"model"\s*:\s*"([^"]+)"/);
-      if (modelMatch) {
-        console.log('[z-api-proxy]   model BEFORE rewrite: ' + modelMatch[1]);
-      }
       for (const [from, to] of FORWARD_MAP) {
         reqBody = reqBody.replaceAll('"model":"' + from + '"', '"model":"' + to + '"');
         reqBody = reqBody.replaceAll('"model": "' + from + '"', '"model": "' + to + '"');
-      }
-      const modelAfter = reqBody.match(/"model"\s*:\s*"([^"]+)"/);
-      if (modelAfter) {
-        console.log('[z-api-proxy]   model AFTER rewrite:  ' + modelAfter[1]);
       }
       init.body = reqBody;
     }
 
     if (API_KEY) {
-      if (!acceptedKeys.some(k => k && sentKey === k)) {
-        console.log('[z-api-proxy] REQUEST REJECTED — invalid API key');
+      const m = matchAnyKey(sentKey, acceptedKeys);
+      if (!m.ok) {
         return new Response(JSON.stringify({
-          error: {
-            message: 'Invalid API key.',
-            type: 'invalid_request_error',
-            code: 'invalid_api_key'
-          }
-        }), {
-          status: 401,
-          headers: { 'Content-Type': 'application/json' }
-        });
+          error: { message: 'Invalid API key.', type: 'invalid_request_error', code: 'invalid_api_key' }
+        }), { status: 401, headers: { 'Content-Type': 'application/json' } });
       }
-      console.log('[z-api-proxy] request accepted, forwarding to upstream');
+      // Record stats for this client.
+      recordStats(m.clientId);
+      // Forward with real upstream key.
       init.headers['Authorization'] = 'Bearer ' + API_KEY;
       init.headers['x-api-key'] = API_KEY;
     } else {
@@ -170,18 +187,19 @@ export default {
       }), { status: 401, headers: { 'Content-Type': 'application/json' } });
     }
 
+    let upstreamPath = url.pathname.replace(/^\/v1/, '');
+    if (!upstreamPath.startsWith('/')) upstreamPath = '/' + upstreamPath;
+    const upstreamUrl = UPSTREAM + upstreamPath + url.search;
+
     const upstreamReq = new Request(upstreamUrl, init);
     let upstreamResp;
     try {
       upstreamResp = await fetch(upstreamReq);
     } catch (e) {
-      console.log('[z-api-proxy] UPSTREAM FETCH ERROR: ' + e.message);
       return new Response(JSON.stringify({
         error: { message: 'upstream unreachable: ' + e.message, type: 'server_error' }
       }), { status: 502, headers: { 'Content-Type': 'application/json' } });
     }
-
-    console.log('[z-api-proxy]   upstream returned HTTP ' + upstreamResp.status);
 
     const respHeaders = new Headers();
     for (const [key, value] of upstreamResp.headers.entries()) {
@@ -226,6 +244,10 @@ export default {
     }
 
     let respBody = await upstreamResp.text();
+    // Estimate tokens from response size (rough: 4 chars = 1 token).
+    if (m.clientId && _stats[m.clientId]) {
+      _stats[m.clientId].tokens += Math.ceil(respBody.length / 4);
+    }
     for (const [from, to] of REVERSE_MAP) {
       respBody = respBody.replaceAll('"model":"' + from + '"', '"model":"' + to + '"');
       respBody = respBody.replaceAll('"model": "' + from + '"', '"model": "' + to + '"');

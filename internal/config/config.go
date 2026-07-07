@@ -72,9 +72,10 @@ type UpstreamConfig struct {
 
 // ProxyConfig holds the cursor-to-worker key. The Worker validates
 // this key, then swaps it for the real upstream key.
-// CursorKey is populated from secrets.toml.
+// ProxyConfig holds the cursor-to-worker key and client identity.
 type ProxyConfig struct {
-	CursorKey string `toml:"-"` // injected from secrets.toml
+	CursorKey string `toml:"-"`        // injected from secrets.toml
+	ClientID  string `toml:"client_id"` // empty = OS username
 }
 
 // TunnelConfig holds optional Cloudflare Named Tunnel settings.
@@ -103,7 +104,7 @@ type CloudflareConfig struct {
 // WorkerStatsConfig controls polling of Cloudflare Worker analytics.
 type WorkerStatsConfig struct {
 	Enabled  bool `toml:"enabled"`
-	Interval int  `toml:"interval_seconds"` // poll interval, default 10
+	Interval int  `toml:"interval_seconds"` // poll interval, default 60
 }
 
 // ModelMapping defines a single bidirectional model-names translation.
@@ -135,9 +136,17 @@ func Load(path string) (*Config, error) {
 	if cfg.Cloudflare.WorkerName == "" {
 		cfg.Cloudflare.WorkerName = "z-api-proxy"
 	}
-	// WorkerStats defaults: enabled, 10s interval.
+	// Auto-fill client ID from OS username if empty.
+	if cfg.Proxy.ClientID == "" {
+		cfg.Proxy.ClientID = os.Getenv("USERNAME")
+		if cfg.Proxy.ClientID == "" {
+			cfg.Proxy.ClientID = "default"
+		}
+	}
+
+	// WorkerStats defaults: enabled, 60s interval.
 	if cfg.WorkerStats.Interval == 0 {
-		cfg.WorkerStats.Interval = 10
+		cfg.WorkerStats.Interval = 60
 	}
 	return &cfg, nil
 }

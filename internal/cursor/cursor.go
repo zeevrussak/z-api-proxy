@@ -58,10 +58,10 @@ func contains(s, substr string) bool {
 }
 
 // RegisterModels writes the proxy base URL and model names into Cursor's
-// settings.json using the OpenAI API override (the only one Cursor supports).
-// cursorKey is the Gateway Worker Key that Cursor will send.
-// Returns the path to settings.json and nil on success.
-func RegisterModels(proxyURL string, modelNames []string, cursorKey string) (string, error) {
+// settings.json using the OpenAI API override.
+// cursorKey is the Gateway Worker Key. clientID is appended as _clientId
+// for per-client tracking. Returns the path and nil on success.
+func RegisterModels(proxyURL string, modelNames []string, cursorKey, clientID string) (string, error) {
 	settingsPath := SettingsPath()
 	if settingsPath == "" {
 		return "", fmt.Errorf("Cursor installation not found (expected %%APPDATA%%\\Cursor\\User\\settings.json)")
@@ -85,7 +85,11 @@ func RegisterModels(proxyURL string, modelNames []string, cursorKey string) (str
 	settings["cursor.general.openaiApiBaseUrl"] = proxyURL
 	settings["cursor.general.enableOpenaiApiBaseUrl"] = true
 	if cursorKey != "" {
-		settings["cursor.general.openaiApiKey"] = cursorKey
+		composite := cursorKey
+		if clientID != "" {
+			composite = cursorKey + "_" + clientID
+		}
+		settings["cursor.general.openaiApiKey"] = composite
 	}
 
 	// Add model names.

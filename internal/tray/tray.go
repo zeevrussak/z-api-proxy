@@ -312,7 +312,7 @@ func (t *trayApp) updateTooltip() {
 		if wTotal > 0 {
 			wSuccess := t.workerSuccess.Load()
 			wErrors := t.workerErrors.Load()
-			tip += fmt.Sprintf("\nWorker: %d total | %d ok | %d err", wTotal, wSuccess, wErrors)
+			tip += fmt.Sprintf("\nWorker: %d total | %d ok | %d err (5m delay)", wTotal, wSuccess, wErrors)
 		}
 		systray.SetTooltip(tip)
 	}
@@ -601,7 +601,7 @@ func (t *trayApp) registerModels() {
 		modelNames = append(modelNames, m.From)
 	}
 
-	settingsPath, err := cursorint.RegisterModels(proxyURL, modelNames, cfg.Proxy.CursorKey)
+	settingsPath, err := cursorint.RegisterModels(proxyURL, modelNames, cfg.Proxy.CursorKey, cfg.Proxy.ClientID)
 	if err != nil {
 		log.Printf("register models error: %v", err)
 		messageBox("Failed to register models in Cursor:\n\n"+err.Error(),

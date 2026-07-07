@@ -57,6 +57,16 @@ if %ERRORLEVEL% equ 0 (
     echo       rsrc not found, using existing z-api-proxy.syso
 )
 
+:: --- Download dependencies ---
+echo.
+echo [0.5/5] Downloading Go dependencies...
+go mod download
+if %ERRORLEVEL% neq 0 (
+    echo FAILED: go mod download
+    exit /b 1
+)
+echo       Done.
+
 :: --- Build Go binaries ---
 echo.
 echo [1/5] Building amd64 binary...

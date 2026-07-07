@@ -31,13 +31,14 @@ import (
 // Sensitive fields (APIKey, APIToken, TunnelToken) are loaded from
 // secrets.toml and merged in at runtime.
 type Config struct {
-	Server     ServerConfig     `toml:"server"`
-	Upstream   UpstreamConfig   `toml:"upstream"`
-	Proxy      ProxyConfig      `toml:"proxy"`
-	Tunnel     TunnelConfig     `toml:"tunnel"`
-	Security   SecurityConfig   `toml:"security"`
-	Cloudflare CloudflareConfig `toml:"cloudflare"`
-	Models     []ModelMapping   `toml:"models"`
+	Server      ServerConfig      `toml:"server"`
+	Upstream    UpstreamConfig    `toml:"upstream"`
+	Proxy       ProxyConfig       `toml:"proxy"`
+	Tunnel      TunnelConfig      `toml:"tunnel"`
+	Security    SecurityConfig    `toml:"security"`
+	Cloudflare  CloudflareConfig  `toml:"cloudflare"`
+	WorkerStats WorkerStatsConfig `toml:"worker_stats"`
+	Models      []ModelMapping    `toml:"models"`
 }
 
 // secretsFile is the structure of secrets.toml — contains only sensitive
@@ -99,6 +100,12 @@ type CloudflareConfig struct {
 	EnableLogging   bool   `toml:"enable_logging"`
 }
 
+// WorkerStatsConfig controls polling of Cloudflare Worker analytics.
+type WorkerStatsConfig struct {
+	Enabled  bool `toml:"enabled"`
+	Interval int  `toml:"interval_seconds"` // poll interval, default 10
+}
+
 // ModelMapping defines a single bidirectional model-names translation.
 type ModelMapping struct {
 	From string `toml:"from"`
@@ -127,6 +134,10 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.Cloudflare.WorkerName == "" {
 		cfg.Cloudflare.WorkerName = "z-api-proxy"
+	}
+	// WorkerStats defaults: enabled, 10s interval.
+	if cfg.WorkerStats.Interval == 0 {
+		cfg.WorkerStats.Interval = 10
 	}
 	return &cfg, nil
 }
@@ -223,7 +234,7 @@ from = "z.ai/glm-5.2/200k"
 to = "glm-5.2"
 
 [[models]]
-from = "z.ai/gielem51/1M"
+from = "z.ai/glm-5.1/1M"
 to = "glm-5.1"
 
 [[models]]

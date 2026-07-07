@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -187,6 +188,11 @@ type trayApp struct {
 	configPath string
 	tunnel     *tunnel.Manager
 	version    string
+
+	// Worker stats (polled from Cloudflare analytics API).
+	workerTotal   atomic.Int64
+	workerSuccess atomic.Int64
+	workerErrors  atomic.Int64
 }
 
 func Run(iconNormal, iconError []byte, manager *config.Manager, ctr *counter.Counter, px *proxy.Proxy, configPath string, version string) {
@@ -243,6 +249,12 @@ func (t *trayApp) onReady() {
 	go t.handleMenu(mConfig, mConfigRaw, mTest, mCopyURL, mTunnel, mWorker, mCreateTunnel, mRegister, mStartup, mUpdate, mContact, mExit)
 	go t.checkForUpdates(mUpdate)
 
+	// Start Worker stats polling if enabled.
+	cfg := t.manager.Get()
+	if cfg.WorkerStats.Enabled && cfg.Cloudflare.AccountID != "" {
+		go t.pollWorkerStats(cfg.WorkerStats.Interval)
+	}
+
 	// Auto-start: prefer Worker URL. If no Worker deployed, try tunnel.
 	if loadWorkerURL() == "" && loadTunnelPref() {
 		go t.autoStartTunnel(mTunnel, mCopyURL)
@@ -254,6 +266,35 @@ func (t *trayApp) onReady() {
 
 func (t *trayApp) onExit() {}
 
+// pollWorkerStats queries Cloudflare analytics every N seconds and
+// updates the atomic counters for display in the tooltip.
+func (t *trayApp) pollWorkerStats(intervalSec int) {
+	if intervalSec < 5 {
+		intervalSec = 5
+	}
+	ticker := time.NewTicker(time.Duration(intervalSec) * time.Second)
+	defer ticker.Stop()
+
+	// Initial fetch immediately.
+	t.fetchWorkerStats()
+
+	for range ticker.C {
+		t.fetchWorkerStats()
+	}
+}
+
+func (t *trayApp) fetchWorkerStats() {
+	cfg := t.manager.Get()
+	stats, err := worker.FetchWorkerStats(cfg)
+	if err != nil {
+		log.Printf("worker stats: %v", err)
+		return
+	}
+	t.workerTotal.Store(stats.TotalRequests)
+	t.workerSuccess.Store(stats.SuccessCount)
+	t.workerErrors.Store(stats.ErrorCount)
+}
+
 func (t *trayApp) updateTooltip() {
 	for {
 		time.Sleep(time.Second)
@@ -263,8 +304,16 @@ func (t *trayApp) updateTooltip() {
 		if t.proxy.HasError() {
 			status = "ERROR"
 		}
-		tip := fmt.Sprintf("Z-API Proxy — %s [%s]\nHandled: %d | Rejected: %d",
+		tip := fmt.Sprintf("Z-API Proxy — %s [%s]\nLocal: %d handled | %d rejected",
 			cfg.Server.Listen, status, h, r)
+
+		// Append Worker stats if available.
+		wTotal := t.workerTotal.Load()
+		if wTotal > 0 {
+			wSuccess := t.workerSuccess.Load()
+			wErrors := t.workerErrors.Load()
+			tip += fmt.Sprintf("\nWorker: %d total | %d ok | %d err", wTotal, wSuccess, wErrors)
+		}
 		systray.SetTooltip(tip)
 	}
 }

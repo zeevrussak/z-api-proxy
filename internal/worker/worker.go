@@ -475,3 +475,97 @@ func truncate(s string, maxLen int) string {
 	}
 	return s[:maxLen] + "..."
 }
+
+// WorkerStats holds polled analytics for a deployed Worker.
+type WorkerStats struct {
+	TotalRequests   int64
+	SuccessCount    int64
+	ErrorCount      int64
+	Subrequests     int64
+}
+
+// FetchWorkerStats queries the Cloudflare Workers Analytics API for
+// recent request counts. Returns nil stats if the Worker has no traffic.
+func FetchWorkerStats(cfg *config.Config) (*WorkerStats, error) {
+	if cfg.Cloudflare.AccountID == "" || cfg.Cloudflare.APIToken == "" {
+		return nil, fmt.Errorf("cloudflare credentials not configured")
+	}
+
+	name := workerName(cfg)
+	// Query the GraphQL analytics endpoint for the last 1 hour.
+	query := map[string]interface{}{
+		"query": fmt.Sprintf(`{
+			viewer {
+				accounts(filter: {accountTag: "%s"}) {
+					workersInvocationsAdaptive(
+						filter: {scriptName: "%s", datetime_gt: "%s"},
+						limit: 10000
+					) {
+						sum {
+							requests
+							errors
+							subrequests
+						}
+					}
+				}
+			}
+		}`, cfg.Cloudflare.AccountID, name, time.Now().Add(-1*time.Hour).UTC().Format(time.RFC3339)),
+	}
+
+	body, _ := json.Marshal(query)
+	url := fmt.Sprintf("%s/graphql", apiBaseOverride)
+	client := &http.Client{Timeout: 15 * time.Second}
+	req, err := http.NewRequest("POST", url, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+cfg.Cloudflare.APIToken)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("analytics request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("analytics API returned HTTP %d", resp.StatusCode)
+	}
+
+	var result struct {
+		Data struct {
+			Viewer struct {
+				Accounts []struct {
+					WorkersInvocationsAdaptive []struct {
+						Sum struct {
+							Requests    int64 `json:"requests"`
+							Errors      int64 `json:"errors"`
+							Subrequests int64 `json:"subrequests"`
+						} `json:"sum"`
+					} `json:"workersInvocationsAdaptive"`
+				} `json:"accounts"`
+			} `json:"viewer"`
+		} `json:"data"`
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("cannot parse analytics response: %w", err)
+	}
+	if len(result.Errors) > 0 {
+		return nil, fmt.Errorf("analytics error: %s", result.Errors[0].Message)
+	}
+
+	stats := &WorkerStats{}
+	if len(result.Data.Viewer.Accounts) > 0 {
+		for _, inv := range result.Data.Viewer.Accounts[0].WorkersInvocationsAdaptive {
+			stats.TotalRequests += inv.Sum.Requests
+			stats.ErrorCount += inv.Sum.Errors
+			stats.Subrequests += inv.Sum.Subrequests
+		}
+		stats.SuccessCount = stats.TotalRequests - stats.ErrorCount
+	}
+	return stats, nil
+}

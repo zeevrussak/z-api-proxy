@@ -23,10 +23,10 @@ import (
 	"strings"
 )
 
-const allModels = `[z.ai/gielem52/1M, z.ai/glm-5.2/200k, z.ai/gielem51/1M, z.ai/glm-5, z.ai/glm-5-turbo, z.ai/glm-5v-turbo, z.ai/glm-4.7, z.ai/glm-4.7-flash, z.ai/glm-4.7-flashx, z.ai/glm-4.6, z.ai/glm-4.6v, z.ai/glm-4.5, z.ai/glm-4.5-air, z.ai/glm-4.5-flash, z.ai/glm-4.5v]`
+const allModels = `[z.ai/gielem52/1M, z.ai/glm-5.2/200k, z.ai/glm-5.1/1M, z.ai/glm-5, z.ai/glm-5-turbo, z.ai/glm-5v-turbo, z.ai/glm-4.7, z.ai/glm-4.7-flash, z.ai/glm-4.7-flashx, z.ai/glm-4.6, z.ai/glm-4.6v, z.ai/glm-4.5, z.ai/glm-4.5-air, z.ai/glm-4.5-flash, z.ai/glm-4.5v]`
 
 var modelNames = []string{
-	"z.ai/gielem52/1M", "z.ai/glm-5.2/200k", "z.ai/gielem51/1M", "z.ai/glm-5", "z.ai/glm-5-turbo", "z.ai/glm-5v-turbo",
+	"z.ai/gielem52/1M", "z.ai/glm-5.2/200k", "z.ai/glm-5.1/1M", "z.ai/glm-5", "z.ai/glm-5-turbo", "z.ai/glm-5v-turbo",
 	"z.ai/glm-4.7", "z.ai/glm-4.7-flash", "z.ai/glm-4.7-flashx",
 	"z.ai/glm-4.6", "z.ai/glm-4.6v",
 	"z.ai/glm-4.5", "z.ai/glm-4.5-air", "z.ai/glm-4.5-flash", "z.ai/glm-4.5v",

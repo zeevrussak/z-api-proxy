@@ -81,7 +81,7 @@ export default {
       const MODEL_SPECS = {
         'z.ai/gielem52/1M':    { ctx: 1048576, maxOut: 131072 },
         'z.ai/glm-5.2/200k':  { ctx: 200000,  maxOut: 131072 },
-        'z.ai/gielem51/1M':    { ctx: 1048576, maxOut: 131072 },
+        'z.ai/glm-5.1/1M':    { ctx: 1048576, maxOut: 131072 },
         'z.ai/glm-5':         { ctx: 131072,  maxOut: 131072 },
         'z.ai/glm-5-turbo':   { ctx: 131072,  maxOut: 131072 },
         'z.ai/glm-5v-turbo':  { ctx: 131072,  maxOut: 131072 },

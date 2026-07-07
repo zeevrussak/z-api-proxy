@@ -21,18 +21,17 @@ if "%VERSION%"=="" (
     exit /b 1
 )
 
-:: --- Increment build number ---
-:: VERSION format: 1.0.0-alpha+N where N is the build number.
-:: Extract N, increment, write back.
-for /f "tokens=2 delims=+" %%b in ("%VERSION%") do set BUILD=%%b
-if "%BUILD%"=="" set BUILD=0
+:: --- Parse and increment build number ---
+:: VERSION format: 1.0.0-alpha+N
+for /f "tokens=1,2 delims=+" %%a in ("%VERSION%") do (
+    set BASEVER=%%a
+    set BUILD=%%b
+)
+if "!BUILD!"=="" set BUILD=0
 set /a BUILD+=1
-set VERSION=%VERSION:+=+N%
-:: Rebuild version string with new build number.
-for /f "tokens=1 delims=+" %%a in ("%VERSION%") do set BASEVER=%%a
-set VERSION=%BASEVER%+%BUILD%
-echo %VERSION%> VERSION
-echo   Build number: %BUILD%
+set VERSION=!BASEVER!+!BUILD!
+echo !VERSION!>VERSION
+echo   Version: !VERSION! ^(build !BUILD!^)
 
 :: --- Derive numeric MSI version (strip pre-release suffix) ---
 for /f "tokens=1 delims=-" %%a in ("%VERSION%") do set MSIVER=%%a

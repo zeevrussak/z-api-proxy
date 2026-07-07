@@ -260,11 +260,11 @@ from = "z.ai/glm-5.2/200k/fast"
 to = "glm-5.2|none"
 
 [[models]]
-from = "z.ai/glm-5.1/1M/max"
+from = "z.ai/glm-5.1/max"
 to = "glm-5.1|max"
 
 [[models]]
-from = "z.ai/glm-5.1/1M/fast"
+from = "z.ai/glm-5.1/fast"
 to = "glm-5.1|none"
 
 [[models]]

@@ -11,14 +11,15 @@ import (
 
 // ProcessResult holds the outcome of a background operation.
 type ProcessResult struct {
-	Success  bool
-	Title    string
-	Summary  string
+	Success bool
+	Title   string
+	Summary string
 }
 
-// showProcessDialog shows a dialog that displays "Working..." while the
-// operation runs in a goroutine, then switches to a summary with an OK button.
-// The operation function receives a progress callback for status updates.
+// showProcessDialog shows a window with a status label while the operation
+// runs in a background goroutine. On completion, the label updates to the
+// summary and the OK button enables. The operation can call the progress
+// callback to update the status text live.
 func showProcessDialog(title, message string, op func(progress func(string)) ProcessResult) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
@@ -27,9 +28,8 @@ func showProcessDialog(title, message string, op func(progress func(string)) Pro
 	var lbl *walk.Label
 	var okBtn *walk.PushButton
 
-	result := make(chan ProcessResult, 1)
-
-	_, err := MainWindow{
+	// Build and create the window (does not block — Run blocks below).
+	mw := MainWindow{
 		AssignTo: &dlg,
 		Title:    title,
 		MinSize:  Size{Width: 400, Height: 130},
@@ -46,19 +46,18 @@ func showProcessDialog(title, message string, op func(progress func(string)) Pro
 				Children: []Widget{
 					HSpacer{},
 					PushButton{
-						AssignTo: &okBtn,
-						Text:     "OK",
-						Enabled:  false,
-						OnClicked: func() {
-							dlg.Close()
-						},
+						AssignTo:  &okBtn,
+						Text:      "OK",
+						Enabled:   false,
+						OnClicked: func() { dlg.Close() },
 					},
 				},
 			},
 		},
-	}.Run()
+	}
 
-	if err != nil {
+	// Create the window first (without running the message loop).
+	if err := mw.Create(); err != nil {
 		// Fallback: run synchronously and show result via MsgBox.
 		r := op(func(s string) {})
 		var icon walk.MsgBoxStyle
@@ -71,7 +70,8 @@ func showProcessDialog(title, message string, op func(progress func(string)) Pro
 		return
 	}
 
-	// Start the operation in a goroutine.
+	// Now the window exists (dlg is populated). Start the operation in
+	// a goroutine — it can update the label via Synchronize.
 	go func() {
 		r := op(func(status string) {
 			if dlg != nil && lbl != nil {
@@ -80,39 +80,27 @@ func showProcessDialog(title, message string, op func(progress func(string)) Pro
 				})
 			}
 		})
-		result <- r
-	}()
 
-	// Poll for completion using a timer.
-	go func() {
-		select {
-		case r := <-result:
-			if dlg == nil {
-				return
-			}
+		// Update UI with result.
+		if dlg != nil {
 			dlg.Synchronize(func() {
 				if r.Success {
 					dlg.SetTitle(r.Title)
-					lbl.SetText(r.Summary)
 				} else {
 					dlg.SetTitle(r.Title + " — Failed")
+				}
+				if lbl != nil {
 					lbl.SetText(r.Summary)
 				}
 				if okBtn != nil {
 					okBtn.SetEnabled(true)
 				}
 			})
-		case <-time.After(120 * time.Second):
-			if dlg != nil {
-				dlg.Synchronize(func() {
-					lbl.SetText("Operation timed out.")
-					if okBtn != nil {
-						okBtn.SetEnabled(true)
-					}
-				})
-			}
 		}
 	}()
+
+	// Run the message loop — blocks until OK clicked → dlg.Close().
+	mw.Run()
 }
 
 // formatDeploySummary creates a result summary for Worker deployment.
@@ -134,4 +122,84 @@ func formatRegisterSummary(path string, count int) string {
 // formatTunnelSummary creates a result summary for tunnel creation.
 func formatTunnelSummary(hostname string) string {
 	return fmt.Sprintf("Named tunnel created!\n\nHostname: %s\nToken saved to secrets.toml", hostname)
+}
+
+// StartProcessDialog creates the process dialog and returns immediately.
+// Used by test code to verify the dialog lifecycle.
+// Returns the window handle and a completion channel.
+func StartProcessDialog(title, message string, op func(progress func(string)) ProcessResult) (*walk.MainWindow, chan ProcessResult) {
+	var dlg *walk.MainWindow
+	var lbl *walk.Label
+	var okBtn *walk.PushButton
+	done := make(chan ProcessResult, 1)
+
+	mw := MainWindow{
+		AssignTo: &dlg,
+		Title:    title,
+		MinSize:  Size{Width: 400, Height: 130},
+		Size:     Size{Width: 450, Height: 150},
+		Layout:   VBox{Margins: Margins{Left: 20, Top: 15, Right: 20, Bottom: 10}, Spacing: 8},
+		Children: []Widget{
+			Label{AssignTo: &lbl, Text: message + "...", MinSize: Size{Height: 30}},
+			Composite{
+				Layout: HBox{MarginsZero: true},
+				Children: []Widget{
+					HSpacer{},
+					PushButton{
+						AssignTo:  &okBtn,
+						Text:      "OK",
+						Enabled:   false,
+						OnClicked: func() { dlg.Close() },
+					},
+				},
+			},
+		},
+	}
+
+	if err := mw.Create(); err != nil {
+		go func() {
+			r := op(func(s string) {})
+			done <- r
+		}()
+		return nil, done
+	}
+
+	go func() {
+		r := op(func(status string) {
+			if dlg != nil && lbl != nil {
+				dlg.Synchronize(func() {
+					lbl.SetText(status)
+				})
+			}
+		})
+
+		if dlg != nil {
+			dlg.Synchronize(func() {
+				if r.Success {
+					dlg.SetTitle(r.Title)
+				} else {
+					dlg.SetTitle(r.Title + " — Failed")
+				}
+				if lbl != nil {
+					lbl.SetText(r.Summary)
+				}
+				if okBtn != nil {
+					okBtn.SetEnabled(true)
+				}
+			})
+		}
+		done <- r
+	}()
+
+	// Auto-close after 5 seconds for testing.
+	go func() {
+		time.Sleep(5 * time.Second)
+		if dlg != nil {
+			dlg.Synchronize(func() {
+				dlg.Close()
+			})
+		}
+	}()
+
+	return dlg, done
 }

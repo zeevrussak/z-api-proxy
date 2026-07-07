@@ -318,10 +318,9 @@ func TestGenerateScript_ModelSpecsGLM52(t *testing.T) {
 	}
 	script := GenerateScript(cfg)
 
-	// The JS contains: 'glm-5.2': { ctx: 1048576, maxOut: 131072 }
-	// Verify all parts present for glm-5.2.
-	if !strings.Contains(script, "'glm-5.2'") {
-		t.Error("script missing glm-5.2 in MODEL_SPECS")
+	// JS now keys MODEL_SPECS by cursor-facing name.
+	if !strings.Contains(script, "z.ai/gielem52/1M") {
+		t.Error("script missing z.ai/gielem52/1M in MODEL_SPECS")
 	}
 	if !strings.Contains(script, "ctx: 1048576") {
 		t.Error("script missing 1M context in glm-5.2 spec")

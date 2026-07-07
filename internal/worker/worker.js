@@ -79,24 +79,25 @@ export default {
     // Cursor reads context_length and max_tokens from here.
     if (url.pathname === '/v1/models' || url.pathname === '/models') {
       const MODEL_SPECS = {
-        'glm-5.2':        { ctx: 1048576, maxOut: 131072 },
-        'glm-5.1':        { ctx: 1048576, maxOut: 131072 },
-        'glm-5':          { ctx: 131072,  maxOut: 131072 },
-        'glm-5-turbo':    { ctx: 131072,  maxOut: 131072 },
-        'glm-5v-turbo':   { ctx: 131072,  maxOut: 131072 },
-        'glm-4.7':        { ctx: 131072,  maxOut: 131072 },
-        'glm-4.7-flash':  { ctx: 131072,  maxOut: 131072 },
-        'glm-4.7-flashx': { ctx: 131072,  maxOut: 131072 },
-        'glm-4.6':        { ctx: 200000,  maxOut: 131072 },
-        'glm-4.6v':       { ctx: 131072,  maxOut: 32768 },
-        'glm-4.5':        { ctx: 131072,  maxOut: 98304 },
-        'glm-4.5-air':    { ctx: 131072,  maxOut: 98304 },
-        'glm-4.5-flash':  { ctx: 131072,  maxOut: 98304 },
-        'glm-4.5v':       { ctx: 131072,  maxOut: 16384 },
+        'z.ai/gielem52/1M':    { ctx: 1048576, maxOut: 131072 },
+        'z.ai/gielem52/200k':  { ctx: 200000,  maxOut: 131072 },
+        'z.ai/gielem51/1M':    { ctx: 1048576, maxOut: 131072 },
+        'z.ai/glm-5':         { ctx: 131072,  maxOut: 131072 },
+        'z.ai/glm-5-turbo':   { ctx: 131072,  maxOut: 131072 },
+        'z.ai/glm-5v-turbo':  { ctx: 131072,  maxOut: 131072 },
+        'z.ai/glm-4.7':       { ctx: 131072,  maxOut: 131072 },
+        'z.ai/glm-4.7-flash': { ctx: 131072,  maxOut: 131072 },
+        'z.ai/glm-4.7-flashx':{ ctx: 131072,  maxOut: 131072 },
+        'z.ai/glm-4.6':       { ctx: 200000,  maxOut: 131072 },
+        'z.ai/glm-4.6v':      { ctx: 131072,  maxOut: 32768 },
+        'z.ai/glm-4.5':       { ctx: 131072,  maxOut: 98304 },
+        'z.ai/glm-4.5-air':   { ctx: 131072,  maxOut: 98304 },
+        'z.ai/glm-4.5-flash': { ctx: 131072,  maxOut: 98304 },
+        'z.ai/glm-4.5v':      { ctx: 131072,  maxOut: 16384 },
       };
       const models = [];
       for (const [cursorName, upstreamName] of FORWARD_MAP) {
-        const spec = MODEL_SPECS[upstreamName] || { ctx: 131072, maxOut: 65536 };
+        const spec = MODEL_SPECS[cursorName] || { ctx: 131072, maxOut: 65536 };
         models.push({
           id: cursorName,
           object: 'model',

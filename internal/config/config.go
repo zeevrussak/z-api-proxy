@@ -208,13 +208,22 @@ worker_name = "z-api-proxy"
 # Model name mappings.
 # Cursor sends "from", proxy rewrites to "to" before forwarding upstream.
 
+# IMPORTANT: Use obfuscated cursor-facing names (e.g. z.ai/gielem52/1M)
+# instead of z.ai/glm-5.2. Cursor recognizes known model names and
+# overrides the context window returned by /v1/models with its own values.
+# Obfuscated names force Cursor to use our /v1/models context_length.
+
 # GLM-5 family
 [[models]]
-from = "z.ai/glm-5.2"
+from = "z.ai/gielem52/1M"
 to = "glm-5.2"
 
 [[models]]
-from = "z.ai/glm-5.1"
+from = "z.ai/gielem52/200k"
+to = "glm-5.2"
+
+[[models]]
+from = "z.ai/gielem51/1M"
 to = "glm-5.1"
 
 [[models]]

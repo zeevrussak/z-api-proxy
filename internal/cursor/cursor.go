@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"syscall"
 
 	_ "modernc.org/sqlite"
 )
@@ -54,6 +55,7 @@ func IsInstalled() bool {
 // IsRunning reports whether the Cursor process is currently running.
 func IsRunning() bool {
 	cmd := exec.Command("tasklist", "/FI", "IMAGENAME eq Cursor.exe", "/NH")
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	out, err := cmd.Output()
 	if err != nil {
 		return false

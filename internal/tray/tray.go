@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -546,9 +547,16 @@ func (t *trayApp) installUpdate(mUpdate *systray.MenuItem) {
 	systray.Quit()
 }
 
+var deployMutex sync.Mutex
+
 // deployWorker pushes a Cloudflare Worker script that acts as a public
 // reverse proxy with a stable workers.dev URL.
 func (t *trayApp) deployWorker(mCopyURL *systray.MenuItem) {
+	if !deployMutex.TryLock() {
+		return // already running
+	}
+	defer deployMutex.Unlock()
+
 	cfg := t.manager.Get()
 
 	if cfg.Cloudflare.AccountID == "" || cfg.Cloudflare.APIToken == "" {
@@ -596,9 +604,16 @@ func (t *trayApp) deployWorker(mCopyURL *systray.MenuItem) {
 	})
 }
 
+var registerMutex sync.Mutex
+
 // registerModels adds all configured z.ai model names into Cursor's
 // settings.json and ensures they exist in the proxy config.
 func (t *trayApp) registerModels() {
+	if !registerMutex.TryLock() {
+		return // already running
+	}
+	defer registerMutex.Unlock()
+
 	cfg := t.manager.Get()
 
 	if !cursorint.IsInstalled() {

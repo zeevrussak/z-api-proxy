@@ -2,7 +2,6 @@ package tray
 
 import (
 	"fmt"
-	"runtime"
 	"sync"
 
 	"github.com/lxn/walk"
@@ -27,9 +26,6 @@ var processDialogMutex sync.Mutex
 func showProcessDialog(title, message string, op func(progress func(string)) ProcessResult) {
 	processDialogMutex.Lock()
 	defer processDialogMutex.Unlock()
-
-	runtime.LockOSThread()
-	defer runtime.UnlockOSThread()
 
 	var dlg *walk.MainWindow
 	var lbl *walk.Label

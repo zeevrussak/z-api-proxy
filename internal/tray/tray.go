@@ -54,6 +54,13 @@ func messageBox(text, title string, flags uintptr) {
 	walk.MsgBox(nil, title, text, icon)
 }
 
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 // --- Worker URL preference ---
 
 func workerPrefPath() string {
@@ -632,6 +639,21 @@ func (t *trayApp) registerModels() {
 		}
 
 		log.Printf("models registered in Cursor: %s (%d models)", settingsPath, len(modelNames))
+
+		// Verify models actually written.
+		progress("Verifying registration...")
+		missing, verr := cursorint.VerifyModels(modelNames)
+		if verr != nil {
+			log.Printf("verify error: %v", verr)
+		}
+		if len(missing) > 0 {
+			return ProcessResult{
+				Success: false,
+				Title:   "Z-API Proxy — Partial Registration",
+				Summary: fmt.Sprintf("Registered but %d models missing from Cursor: %v", len(missing), missing[:min(5, len(missing))]),
+			}
+		}
+
 		return ProcessResult{
 			Success: true,
 			Title:   "Z-API Proxy — Models Registered",

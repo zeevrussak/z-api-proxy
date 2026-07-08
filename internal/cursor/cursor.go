@@ -70,10 +70,11 @@ func contains(s, substr string) bool {
 	return false
 }
 
+const appUserKey = "src.vs.platform.reactivestorage.browser.reactiveStorageServiceImpl.persistentStorage.applicationUser"
+
 // RegisterModels writes the proxy base URL and model names into Cursor's
-// settings.json AND state.vscdb so they appear in the model picker.
-// cursorKey is the Gateway Worker Key. clientID is appended as _clientId
-// for per-client tracking.
+// settings.json AND state.vscdb (all three locations) so they appear in
+// the model picker.
 func RegisterModels(proxyURL string, modelNames []string, cursorKey, clientID string) (string, error) {
 	settingsPath := SettingsPath()
 	if settingsPath == "" {
@@ -86,15 +87,14 @@ func RegisterModels(proxyURL string, modelNames []string, cursorKey, clientID st
 
 	// 1. Write settings.json.
 	if err := writeSettingsJSON(settingsPath, proxyURL, modelNames, cursorKey, clientID); err != nil {
-		return "", err
+		return settingsPath, err
 	}
 
-	// 2. Write state.vscdb (SQLite) — this is what the model picker reads.
+	// 2. Write state.vscdb (SQLite) — all three model storage locations.
 	dbPath := StateDBPath()
 	if dbPath != "" {
 		if err := writeStateDB(dbPath, modelNames); err != nil {
-			// Non-fatal — settings.json is still written.
-			_ = err
+			return settingsPath, fmt.Errorf("state.vscdb write failed: %w", err)
 		}
 	}
 
@@ -145,57 +145,161 @@ func writeSettingsJSON(settingsPath, proxyURL string, modelNames []string, curso
 	return os.WriteFile(settingsPath, out, 0644)
 }
 
-// writeStateDB writes the model names into Cursor's state.vscdb SQLite.
-// Cursor reads the model picker from ItemTable key "cursor.general.modelNames".
+// writeStateDB writes model names into Cursor's state.vscdb SQLite.
+// Updates three locations inside the applicationUser JSON blob:
+// 1. aiSettings.userAddedModels[] — string list
+// 2. aiSettings.modelOverrideEnabled[] — string list
+// 3. availableDefaultModels2[] — full model objects (what the picker shows)
 func writeStateDB(dbPath string, modelNames []string) error {
-	// Read current value from ItemTable.
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		return fmt.Errorf("cannot open state.vscdb: %w", err)
 	}
 	defer db.Close()
 
-	// Read existing model names from the DB.
-	var existingJSON string
-	err = db.QueryRow(`SELECT value FROM ItemTable WHERE key = 'cursor.general.modelNames'`).Scan(&existingJSON)
-	if err != nil && err != sql.ErrNoRows {
-		return fmt.Errorf("cannot query model names: %w", err)
+	var rawJSON string
+	err = db.QueryRow("SELECT value FROM ItemTable WHERE key = ?", appUserKey).Scan(&rawJSON)
+	if err != nil {
+		return fmt.Errorf("cannot read applicationUser: %w", err)
 	}
 
-	// Parse existing models.
-	var existingModels []interface{}
-	if existingJSON != "" {
-		json.Unmarshal([]byte(existingJSON), &existingModels)
+	var data map[string]interface{}
+	if err := json.Unmarshal([]byte(rawJSON), &data); err != nil {
+		return fmt.Errorf("cannot parse applicationUser JSON: %w", err)
 	}
 
-	// Merge new models.
+	// 1. Update aiSettings.userAddedModels
+	aiSettings, _ := data["aiSettings"].(map[string]interface{})
+	if aiSettings == nil {
+		aiSettings = make(map[string]interface{})
+		data["aiSettings"] = aiSettings
+	}
+
+	userAdded, _ := aiSettings["userAddedModels"].([]interface{})
 	modelSet := make(map[string]bool)
-	for _, m := range existingModels {
+	for _, m := range userAdded {
 		if s, ok := m.(string); ok {
 			modelSet[s] = true
 		}
 	}
 	for _, m := range modelNames {
 		if !modelSet[m] {
-			existingModels = append(existingModels, m)
+			userAdded = append(userAdded, m)
+			modelSet[m] = true
+		}
+	}
+	aiSettings["userAddedModels"] = userAdded
+
+	// 2. Update aiSettings.modelOverrideEnabled
+	overrideEnabled, _ := aiSettings["modelOverrideEnabled"].([]interface{})
+	overrideSet := make(map[string]bool)
+	for _, m := range overrideEnabled {
+		if s, ok := m.(string); ok {
+			overrideSet[s] = true
+		}
+	}
+	for _, m := range modelNames {
+		if !overrideSet[m] {
+			overrideEnabled = append(overrideEnabled, m)
+			overrideSet[m] = true
+		}
+	}
+	aiSettings["modelOverrideEnabled"] = overrideEnabled
+
+	// 3. Update availableDefaultModels2 — add full model objects.
+	availModels, _ := data["availableDefaultModels2"].([]interface{})
+	existingNames := make(map[string]bool)
+	for _, m := range availModels {
+		if obj, ok := m.(map[string]interface{}); ok {
+			if name, ok := obj["name"].(string); ok {
+				existingNames[name] = true
+			}
 		}
 	}
 
-	// Serialize back to JSON.
-	newJSON, err := json.Marshal(existingModels)
+	for _, modelName := range modelNames {
+		if existingNames[modelName] {
+			continue
+		}
+		// Create a minimal model object that Cursor expects.
+		newModel := map[string]interface{}{
+			"name":                 modelName,
+			"defaultOn":            false,
+			"parameterDefinitions": []interface{}{},
+			"variants":             []interface{}{},
+			"legacySlugs":          []interface{}{},
+			"idAliases":            []interface{}{},
+			"cloudAgentEffortModes": []interface{}{},
+			"supportsAgent":         true,
+			"degradationStatus":     0,
+			"supportsThinking":      true,
+			"supportsImages":        false,
+			"supportsMaxMode":       false,
+			"clientDisplayName":     modelName,
+			"serverModelName":       modelName,
+			"supportsNonMaxMode":    true,
+			"inputboxShortModelName": modelName,
+			"supportsSandboxing":    true,
+			"tagline":               "z.ai GLM model via z-api-proxy",
+		}
+		availModels = append(availModels, newModel)
+		existingNames[modelName] = true
+	}
+	data["availableDefaultModels2"] = availModels
+
+	// Serialize back.
+	newJSON, err := json.Marshal(data)
 	if err != nil {
-		return fmt.Errorf("cannot serialize models: %w", err)
+		return fmt.Errorf("cannot serialize applicationUser: %w", err)
 	}
 
-	// Write back to DB.
-	if err == sql.ErrNoRows {
-		_, err = db.Exec(`INSERT INTO ItemTable (key, value) VALUES ('cursor.general.modelNames', ?)`, string(newJSON))
-	} else {
-		_, err = db.Exec(`UPDATE ItemTable SET value = ? WHERE key = 'cursor.general.modelNames'`, string(newJSON))
-	}
+	_, err = db.Exec("UPDATE ItemTable SET value = ? WHERE key = ?", string(newJSON), appUserKey)
 	if err != nil {
-		return fmt.Errorf("cannot write model names to state.vscdb: %w", err)
+		return fmt.Errorf("cannot write applicationUser: %w", err)
 	}
 
 	return nil
+}
+
+// VerifyModels reads state.vscdb and verifies the given models are present
+// in all three storage locations. Returns the list of missing models.
+func VerifyModels(modelNames []string) (missing []string, err error) {
+	dbPath := StateDBPath()
+	if dbPath == "" {
+		return modelNames, fmt.Errorf("state.vscdb not found")
+	}
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		return modelNames, err
+	}
+	defer db.Close()
+
+	var rawJSON string
+	err = db.QueryRow("SELECT value FROM ItemTable WHERE key = ?", appUserKey).Scan(&rawJSON)
+	if err != nil {
+		return modelNames, err
+	}
+
+	var data map[string]interface{}
+	json.Unmarshal([]byte(rawJSON), &data)
+
+	// Check availableDefaultModels2 (the picker source).
+	availModels, _ := data["availableDefaultModels2"].([]interface{})
+	existing := make(map[string]bool)
+	for _, m := range availModels {
+		if obj, ok := m.(map[string]interface{}); ok {
+			if name, ok := obj["name"].(string); ok {
+				existing[name] = true
+			}
+		}
+	}
+
+	for _, name := range modelNames {
+		if !existing[name] {
+			missing = append(missing, name)
+		}
+	}
+
+	return missing, nil
 }

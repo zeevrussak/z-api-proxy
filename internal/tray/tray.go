@@ -615,6 +615,22 @@ func (t *trayApp) deployWorker(mCopyURL *systray.MenuItem) {
 
 var registerMutex sync.Mutex
 
+// TestRegisterModels is a test entry point that calls registerModels
+// without the mutex guard, for window-count testing.
+func TestRegisterModels(cfg *config.Config, configPath string) {
+	app := &trayApp{
+		manager:    &config.Manager{},
+		configPath: configPath,
+	}
+	// We need a real manager, so just use a minimal one.
+	mgr, _ := config.NewManager(configPath)
+	app.manager = mgr
+	app.counter = counter.New()
+	app.proxy = proxy.New(mgr, app.counter)
+	app.tunnel = tunnel.New(cfg.Server.Listen, cfg.Tunnel.Mode, cfg.Tunnel.Token, cfg.Tunnel.Hostname)
+	app.registerModels()
+}
+
 // registerModels adds all configured z.ai model names into Cursor's
 // settings.json and ensures they exist in the proxy config.
 // Guarded by registerMutex to prevent duplicate windows from buffered clicks.

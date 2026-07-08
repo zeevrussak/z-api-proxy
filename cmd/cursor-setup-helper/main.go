@@ -21,16 +21,20 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"z-api-proxy/internal/config"
 )
 
-const allModels = `[z.ai/gielem52/1M, z.ai/glm-5.2/200k, z.ai/glm-5.1/1M, z.ai/glm-5, z.ai/glm-5-turbo, z.ai/glm-5v-turbo, z.ai/glm-4.7, z.ai/glm-4.7-flash, z.ai/glm-4.7-flashx, z.ai/glm-4.6, z.ai/glm-4.6v, z.ai/glm-4.5, z.ai/glm-4.5-air, z.ai/glm-4.5-flash, z.ai/glm-4.5v]`
+var modelNames = func() []string {
+	mappings := config.DefaultModelMappings()
+	names := make([]string, len(mappings))
+	for i, m := range mappings {
+		names[i] = m.From
+	}
+	return names
+}()
 
-var modelNames = []string{
-	"z.ai/gielem52/1M", "z.ai/glm-5.2/200k", "z.ai/glm-5.1/1M", "z.ai/glm-5", "z.ai/glm-5-turbo", "z.ai/glm-5v-turbo",
-	"z.ai/glm-4.7", "z.ai/glm-4.7-flash", "z.ai/glm-4.7-flashx",
-	"z.ai/glm-4.6", "z.ai/glm-4.6v",
-	"z.ai/glm-4.5", "z.ai/glm-4.5-air", "z.ai/glm-4.5-flash", "z.ai/glm-4.5v",
-}
+var allModels = "[" + strings.Join(modelNames, ", ") + "]"
 
 func main() {
 	reader := bufio.NewReader(os.Stdin)

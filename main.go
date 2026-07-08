@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"z-api-proxy/internal/config"
@@ -57,32 +58,54 @@ func main() {
 		log.Fatalf("config error: %v", err)
 	}
 
-	ctr := counter.New()
-	px := proxy.New(manager, ctr)
-
 	cfg := manager.Get()
-	server := &http.Server{
-		Addr:         cfg.Server.Listen,
-		Handler:      px,
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 0,
-		IdleTimeout:  120 * time.Second,
+
+	// Check if a Cloudflare Worker is deployed. If so, skip the local server.
+	workerURL := loadWorkerURLPref()
+	var server *http.Server
+	var ctr *counter.Counter
+	var px *proxy.Proxy
+
+	if workerURL != "" {
+		log.Printf("worker mode active: %s — local server disabled", workerURL)
+		ctr = counter.New()
+		px = proxy.New(manager, ctr) // still needed for tray references
+	} else {
+		ctr = counter.New()
+		px = proxy.New(manager, ctr)
+		server = &http.Server{
+			Addr:         cfg.Server.Listen,
+			Handler:      px,
+			ReadTimeout:  30 * time.Second,
+			WriteTimeout: 0,
+			IdleTimeout:  120 * time.Second,
+		}
+		go func() {
+			log.Printf("listening on %s", cfg.Server.Listen)
+			if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				log.Fatalf("server error: %v", err)
+			}
+		}()
 	}
 
-	go func() {
-		log.Printf("listening on %s", cfg.Server.Listen)
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("server error: %v", err)
-		}
-	}()
-
-	tray.Run(iconNormal, iconError, manager, ctr, px, configPath, version)
+	tray.Run(iconNormal, iconError, manager, ctr, px, configPath, version, workerURL != "")
 
 	log.Println("shutting down")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	server.Shutdown(ctx)
+	if server != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		server.Shutdown(ctx)
+	}
 	log.Println("=== z-api-proxy stopped ===")
+}
+
+// loadWorkerURLPref reads the persisted Worker URL from worker.pref.
+func loadWorkerURLPref() string {
+	data, err := os.ReadFile(filepath.Join(config.AppConfigDir(), "worker.pref"))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
 }
 
 // testUISettings opens the settings dialog, waits 2 seconds, then closes it.

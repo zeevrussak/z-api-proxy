@@ -196,6 +196,7 @@ type trayApp struct {
 	configPath string
 	tunnel     *tunnel.Manager
 	version    string
+	workerMode bool // true = Worker active, local server skipped
 
 	// Worker stats (polled from Cloudflare analytics API).
 	workerTotal   atomic.Int64
@@ -203,7 +204,7 @@ type trayApp struct {
 	workerErrors  atomic.Int64
 }
 
-func Run(iconNormal, iconError []byte, manager *config.Manager, ctr *counter.Counter, px *proxy.Proxy, configPath string, version string) {
+func Run(iconNormal, iconError []byte, manager *config.Manager, ctr *counter.Counter, px *proxy.Proxy, configPath string, version string, workerMode bool) {
 	cfg := manager.Get()
 	app := &trayApp{
 		iconNormal: iconNormal,
@@ -214,6 +215,7 @@ func Run(iconNormal, iconError []byte, manager *config.Manager, ctr *counter.Cou
 		configPath: configPath,
 		tunnel:     tunnel.New(cfg.Server.Listen, cfg.Tunnel.Mode, cfg.Tunnel.Token, cfg.Tunnel.Hostname),
 		version:    version,
+		workerMode: workerMode,
 	}
 	systray.Run(app.onReady, app.onExit)
 }
@@ -321,8 +323,14 @@ func (t *trayApp) updateTooltip() {
 		if t.proxy.HasError() {
 			status = "ERROR"
 		}
-		tip := fmt.Sprintf("Z-API Proxy — %s [%s]\nLocal: %d handled | %d rejected",
-			cfg.Server.Listen, status, h, r)
+
+		var tip string
+		if t.workerMode {
+			tip = fmt.Sprintf("Z-API Proxy — Worker Mode [%s]", status)
+		} else {
+			tip = fmt.Sprintf("Z-API Proxy — %s [%s]\nLocal: %d handled | %d rejected",
+				cfg.Server.Listen, status, h, r)
+		}
 
 		// Append Worker stats if available.
 		wTotal := t.workerTotal.Load()

@@ -375,13 +375,27 @@ func (t *trayApp) handleMenu(mConfig, mConfigRaw, mTest, mCopyURL, mTunnel, mWor
 			go t.toggleTunnel(mTunnel, mCopyURL)
 
 		case <-mWorker.ClickedCh:
-			go t.deployWorker(mCopyURL)
+			if deployMutex.TryLock() {
+				go func() {
+					defer deployMutex.Unlock()
+					t.deployWorker(mCopyURL)
+				}()
+			} else {
+				log.Printf("deploy: already in progress, skipping")
+			}
 
 		case <-mCreateTunnel.ClickedCh:
 			go t.createNamedTunnel(mTunnel, mCopyURL)
 
 		case <-mRegister.ClickedCh:
-			go t.registerModels()
+			if registerMutex.TryLock() {
+				go func() {
+					defer registerMutex.Unlock()
+					t.registerModels()
+				}()
+			} else {
+				log.Printf("register: already in progress, skipping")
+			}
 
 		case <-mStartup.ClickedCh:
 			nowOn := !mStartup.Checked()
@@ -552,11 +566,6 @@ var deployMutex sync.Mutex
 // deployWorker pushes a Cloudflare Worker script that acts as a public
 // reverse proxy with a stable workers.dev URL.
 func (t *trayApp) deployWorker(mCopyURL *systray.MenuItem) {
-	if !deployMutex.TryLock() {
-		return // already running
-	}
-	defer deployMutex.Unlock()
-
 	cfg := t.manager.Get()
 
 	if cfg.Cloudflare.AccountID == "" || cfg.Cloudflare.APIToken == "" {
@@ -608,12 +617,8 @@ var registerMutex sync.Mutex
 
 // registerModels adds all configured z.ai model names into Cursor's
 // settings.json and ensures they exist in the proxy config.
+// Guarded by registerMutex to prevent duplicate windows from buffered clicks.
 func (t *trayApp) registerModels() {
-	if !registerMutex.TryLock() {
-		return // already running
-	}
-	defer registerMutex.Unlock()
-
 	cfg := t.manager.Get()
 
 	if !cursorint.IsInstalled() {

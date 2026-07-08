@@ -2,7 +2,6 @@ package tray
 
 import (
 	"fmt"
-	"sync"
 
 	"github.com/lxn/walk"
 	. "github.com/lxn/walk/declarative"
@@ -15,17 +14,12 @@ type ProcessResult struct {
 	Summary string
 }
 
-// processDialogMutex ensures only one process dialog is open at a time.
-var processDialogMutex sync.Mutex
-
 // showProcessDialog shows a window with a marquee progress bar while the
 // operation runs in a background goroutine. On completion, the label updates
 // to the summary, the progress bar fills to 100%, and the OK button enables.
 //
-// Uses a mutex to guarantee only ONE dialog window exists at any time.
+// Caller must guard against concurrent calls (e.g. TryLock at the call site).
 func showProcessDialog(title, message string, op func(progress func(string)) ProcessResult) {
-	processDialogMutex.Lock()
-	defer processDialogMutex.Unlock()
 
 	var dlg *walk.MainWindow
 	var lbl *walk.Label

@@ -43,13 +43,6 @@ func TestProcessDialogResult(t *testing.T) {
 	}
 }
 
-// TestProcessDialogMutex verifies the mutex prevents concurrent dialogs.
-func TestProcessDialogMutex(t *testing.T) {
-	// Verify mutex is not held (no deadlock).
-	processDialogMutex.Lock()
-	processDialogMutex.Unlock()
-}
-
 // TestProcessResultSuccess verifies ProcessResult fields.
 func TestProcessResultSuccess(t *testing.T) {
 	r := ProcessResult{Success: true, Title: "OK", Summary: "All good"}

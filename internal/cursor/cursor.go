@@ -14,9 +14,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"syscall"
+	"unsafe"
 
 	_ "modernc.org/sqlite"
 )
@@ -53,14 +53,47 @@ func IsInstalled() bool {
 }
 
 // IsRunning reports whether the Cursor process is currently running.
+// Uses FindWindow Win32 API — no subprocess, no command prompt.
 func IsRunning() bool {
-	cmd := exec.Command("tasklist", "/FI", "IMAGENAME eq Cursor.exe", "/NH")
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-	out, err := cmd.Output()
-	if err != nil {
+	k32 := syscall.NewLazyDLL("kernel32.dll")
+	pCreateToolhelp32Snapshot := k32.NewProc("CreateToolhelp32Snapshot")
+	pProcess32First := k32.NewProc("Process32FirstW")
+	pProcess32Next := k32.NewProc("Process32NextW")
+	pCloseHandle := k32.NewProc("CloseHandle")
+
+	type processEntry32 struct {
+		Size            uint32
+		Usage           uint32
+		ProcessID       uintptr
+		DefaultHeapID   uintptr
+		ModuleID        uintptr
+		Threads         uint32
+		ParentProcessID uintptr
+		PriClassBase    int32
+		Flags           uint32
+		ExeFile         [260]uint16
+	}
+
+	const TH32CS_SNAPPROCESS = 0x00000002
+
+	snap, _, _ := pCreateToolhelp32Snapshot.Call(TH32CS_SNAPPROCESS, 0)
+	if snap == 0 || snap == ^uintptr(0) {
 		return false
 	}
-	return len(out) > 0 && contains(string(out), "Cursor.exe")
+	defer pCloseHandle.Call(snap)
+
+	var entry processEntry32
+	entry.Size = uint32(unsafe.Sizeof(entry))
+
+	ret, _, _ := pProcess32First.Call(snap, uintptr(unsafe.Pointer(&entry)))
+	for ret != 0 {
+		exeName := syscall.UTF16ToString(entry.ExeFile[:])
+		if contains(exeName, "Cursor.exe") {
+			return true
+		}
+		ret, _, _ = pProcess32Next.Call(snap, uintptr(unsafe.Pointer(&entry)))
+	}
+	return false
 }
 
 func contains(s, substr string) bool {

@@ -181,6 +181,10 @@ func TestGenerateScript_ModelRewrite(t *testing.T) {
 // TestDeploy_SetsBothSecrets verifies both API_KEY and CURSOR_KEY
 // are pushed to Cloudflare as secrets.
 func TestDeploy_SetsBothSecrets(t *testing.T) {
+	// Deploy now also persists a per-deployment test key under
+	// config.AppConfigDir() — sandbox it to a temp dir so tests don't
+	// read/write the real user's APPDATA.
+	t.Setenv("APPDATA", t.TempDir())
 	cfg := makeWorkerTestConfig()
 
 	var secretNames []string

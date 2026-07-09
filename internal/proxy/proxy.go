@@ -82,6 +82,21 @@ func copyHeaders(dst, src http.Header) {
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	cfg := p.manager.Get()
 
+	// API style filtering: restrict which API paths are allowed.
+	if cfg.Proxy.APIStyle != "both" {
+		isAnthropicPath := strings.Contains(r.URL.Path, "/messages") && !strings.Contains(r.URL.Path, "/chat/completions")
+		if cfg.Proxy.APIStyle == "openai" && isAnthropicPath {
+			p.counter.IncRejected()
+			http.Error(w, `{"error":{"message":"Anthropic API disabled. Set api_style to 'both' or 'anthropic' in config.","type":"invalid_request_error"}}`, http.StatusForbidden)
+			return
+		}
+		if cfg.Proxy.APIStyle == "anthropic" && strings.Contains(r.URL.Path, "/chat/completions") {
+			p.counter.IncRejected()
+			http.Error(w, `{"error":{"message":"OpenAI API disabled. Set api_style to 'both' or 'openai' in config.","type":"invalid_request_error"}}`, http.StatusForbidden)
+			return
+		}
+	}
+
 	// Security: verify the caller's API key matches the configured key.
 	// Accept either OpenAI (Authorization: Bearer) or Anthropic (x-api-key) auth.
 	if cfg.Security.VerifyKey && cfg.Upstream.APIKey != "" {

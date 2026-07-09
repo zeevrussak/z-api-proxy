@@ -12,7 +12,9 @@ package worker
 
 import (
 	"bytes"
+	"crypto/rand"
 	_ "embed"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -20,6 +22,8 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -132,6 +136,11 @@ func Deploy(cfg *config.Config) (*DeployResult, error) {
 				"name":          "MODEL_REVERSE",
 				"text":          string(revJSON),
 			},
+			{
+				"type":          "plain_text",
+				"name":          "API_STYLE",
+				"text":          cfg.Proxy.APIStyle,
+			},
 		},
 	}
 	if cfg.Cloudflare.EnableLogging {
@@ -197,9 +206,13 @@ func Deploy(cfg *config.Config) (*DeployResult, error) {
 		}
 	}
 
-	// Set test key for deployment verification.
-	testKey := TestKey
-	if err := setSecret(client, cfg, name, "TEST_KEY", testKey); err != nil {
+	// Set test key for deployment verification. Generated fresh per
+	// installation (see loadOrCreateTestKey) rather than the old shared
+	// constant that was identical — and public, via source — across
+	// every z-api-proxy install.
+	if testKey, tkErr := loadOrCreateTestKey(); tkErr != nil {
+		log.Printf("worker: warning — could not generate/persist test key: %v (skipping TEST_KEY secret)", tkErr)
+	} else if err := setSecret(client, cfg, name, "TEST_KEY", testKey); err != nil {
 		log.Printf("worker: warning — failed to set TEST_KEY secret: %v", err)
 	} else {
 		log.Printf("worker: TEST_KEY secret set")
@@ -443,18 +456,67 @@ func GetDeployedURL(cfg *config.Config) (string, error) {
 	return getWorkerURL(client, cfg, workerName(cfg))
 }
 
-// TestKey is the built-in test key deployed as a Cloudflare secret.
-const TestKey = "testkey_41324124#$!F"
+// testKeyPath returns where the per-deployment TEST_KEY secret is cached
+// locally, so TestDeployedWorker can present the same value that was
+// last pushed to Cloudflare via Deploy. Not a user-facing credential —
+// never surfaced in the Settings UI — so it lives alongside the other
+// small preference files (worker.pref, tunnel.pref) rather than in
+// secrets.toml, which is reserved for user-provided values.
+func testKeyPath() string {
+	return filepath.Join(config.AppConfigDir(), "worker-testkey.pref")
+}
 
-// TestDeployedWorker calls the /test endpoint with the test key
-// to verify the Worker is deployed and responding correctly.
+// generateTestKey creates a new random per-deployment test key.
+func generateTestKey() (string, error) {
+	buf := make([]byte, 24)
+	if _, err := rand.Read(buf); err != nil {
+		return "", fmt.Errorf("cannot generate test key: %w", err)
+	}
+	return "testkey_" + hex.EncodeToString(buf), nil
+}
+
+// loadOrCreateTestKey returns the cached per-deployment test key,
+// generating and persisting a new one if none exists yet — covers both
+// first deploy and upgrading from a version that used the old shared
+// TestKey constant (that constant no longer exists; a Worker deployed
+// with it will simply fail TestDeployedWorker's /test check until the
+// next Deploy call pushes a freshly generated TEST_KEY secret).
+func loadOrCreateTestKey() (string, error) {
+	path := testKeyPath()
+	if data, err := os.ReadFile(path); err == nil {
+		if k := strings.TrimSpace(string(data)); k != "" {
+			return k, nil
+		}
+	}
+	key, err := generateTestKey()
+	if err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(path, []byte(key), 0600); err != nil {
+		return "", fmt.Errorf("cannot persist test key: %w", err)
+	}
+	return key, nil
+}
+
+// TestDeployedWorker calls the /test endpoint with the locally cached
+// per-deployment test key to verify the Worker is deployed and
+// responding correctly. Returns a clear error (not a crash) if no key
+// has been generated yet or the persisted key doesn't match what's
+// actually deployed (e.g. the Worker predates this key's generation, or
+// was deployed from a different machine) — the fix in both cases is to
+// redeploy, which pushes the locally cached key as the new TEST_KEY.
 func TestDeployedWorker(workerURL string) error {
+	testKey, err := loadOrCreateTestKey()
+	if err != nil {
+		return fmt.Errorf("cannot load test key: %w", err)
+	}
+
 	client := &http.Client{Timeout: 15 * time.Second}
 	req, err := http.NewRequest("GET", workerURL+"/test", nil)
 	if err != nil {
 		return fmt.Errorf("cannot create request: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+TestKey)
+	req.Header.Set("Authorization", "Bearer "+testKey)
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -463,7 +525,7 @@ func TestDeployedWorker(workerURL string) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("worker /test returned HTTP %d (expected 200)", resp.StatusCode)
+		return fmt.Errorf("worker /test returned HTTP %d (expected 200) — if this Worker was deployed before test-key generation was added, redeploy to push a fresh TEST_KEY", resp.StatusCode)
 	}
 	return nil
 }

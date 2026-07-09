@@ -12,15 +12,41 @@
 //   CURSOR_KEY       (secret) — key Cursor sends (validated, swapped for API_KEY)
 //   TEST_KEY         (secret) — built-in test key for deployment verification
 
-// Stats are stored in a global Map (resets on Worker restart, but survives
-// across requests within the same isolate lifetime).
-const _stats = {};
+// Stats are stored in a global null-prototype object (resets on Worker
+// restart, but survives across requests within the same isolate lifetime).
+// Object.create(null) avoids prototype-pollution if a client crafts a
+// clientId like "__proto__" (clientId comes from the key suffix, which is
+// attacker-influenced once a valid key/prefix is known).
+const _stats = Object.create(null);
+
+// timingSafeEqual compares two equal-length strings byte-by-byte with no
+// early exit, so comparison time does not depend on where (or whether)
+// the strings differ. Callers must ensure equal length first — a length
+// check is not itself sensitive here (same trade-off Go's
+// crypto/subtle.ConstantTimeCompare makes: it returns unequal
+// immediately for mismatched lengths without leaking timing on content).
+function timingSafeEqual(a, b) {
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) {
+    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return diff === 0;
+}
 
 function matchKey(sentKey, expectedKey) {
   if (!sentKey || !expectedKey) return { ok: false, clientId: '' };
-  if (sentKey === expectedKey) return { ok: true, clientId: '' };
-  if (sentKey.startsWith(expectedKey + '_')) {
-    return { ok: true, clientId: sentKey.substring(expectedKey.length + 1) };
+  const keyLen = expectedKey.length;
+  if (sentKey.length < keyLen) return { ok: false, clientId: '' };
+  // Constant-time compare of the fixed-length key portion only — mirrors
+  // the local proxy's subtle.ConstantTimeCompare (proxy.go). The
+  // trailing "_<clientId>" suffix (if any) is not secret, so it's
+  // compared/extracted with ordinary (fast) string ops afterward.
+  if (!timingSafeEqual(sentKey.slice(0, keyLen), expectedKey)) {
+    return { ok: false, clientId: '' };
+  }
+  if (sentKey.length === keyLen) return { ok: true, clientId: '' };
+  if (sentKey.charAt(keyLen) === '_') {
+    return { ok: true, clientId: sentKey.substring(keyLen + 1) };
   }
   return { ok: false, clientId: '' };
 }
@@ -51,6 +77,7 @@ export default {
     const UPSTREAM = env.UPSTREAM || 'https://api.z.ai/api/coding/paas/v4';
     const API_KEY = env.API_KEY || '';
     const CURSOR_KEY = env.CURSOR_KEY || '';
+    const API_STYLE = env.API_STYLE || 'openai'; // openai, anthropic, or both
     const FORWARD_MAP = new Map(JSON.parse(env.MODEL_MAPPINGS || '[]'));
     const REVERSE_MAP = new Map(JSON.parse(env.MODEL_REVERSE || '[]'));
     const url = new URL(request.url);
@@ -154,7 +181,19 @@ export default {
       });
     }
 
-    // Main request flow — prefix-match keys, extract client ID.
+    // Main request flow — API style filtering + prefix-match keys.
+    const isAnthropic = url.pathname.includes('/messages') && !url.pathname.includes('/chat/completions');
+    if (API_STYLE === 'openai' && isAnthropic) {
+      return new Response(JSON.stringify({
+        error: { message: 'Anthropic API disabled.', type: 'invalid_request_error' }
+      }), { status: 403, headers: { 'Content-Type': 'application/json' } });
+    }
+    if (API_STYLE === 'anthropic' && url.pathname.includes('/chat/completions')) {
+      return new Response(JSON.stringify({
+        error: { message: 'OpenAI API disabled.', type: 'invalid_request_error' }
+      }), { status: 403, headers: { 'Content-Type': 'application/json' } });
+    }
+
     let reqBody = null;
     const init = { method: request.method, headers: {} };
     for (const [key, value] of request.headers.entries()) {
@@ -200,15 +239,20 @@ export default {
       init.body = reqBody;
     }
 
+    // clientMatch is used later (outside this block) when recording
+    // response-size stats — must be declared at function scope, not
+    // block-scoped to this `if`, or every non-streaming response throws
+    // a ReferenceError (surfaces to the caller as Cloudflare error 1101).
+    let clientMatch = { ok: false, clientId: '' };
     if (API_KEY) {
-      const m = matchAnyKey(sentKey, acceptedKeys);
-      if (!m.ok) {
+      clientMatch = matchAnyKey(sentKey, acceptedKeys);
+      if (!clientMatch.ok) {
         return new Response(JSON.stringify({
           error: { message: 'Invalid API key.', type: 'invalid_request_error', code: 'invalid_api_key' }
         }), { status: 401, headers: { 'Content-Type': 'application/json' } });
       }
       // Record stats for this client.
-      recordStats(m.clientId);
+      recordStats(clientMatch.clientId);
       // Forward with real upstream key.
       init.headers['Authorization'] = 'Bearer ' + API_KEY;
       init.headers['x-api-key'] = API_KEY;
@@ -276,8 +320,8 @@ export default {
 
     let respBody = await upstreamResp.text();
     // Estimate tokens from response size (rough: 4 chars = 1 token).
-    if (m.clientId && _stats[m.clientId]) {
-      _stats[m.clientId].tokens += Math.ceil(respBody.length / 4);
+    if (clientMatch.clientId && _stats[clientMatch.clientId]) {
+      _stats[clientMatch.clientId].tokens += Math.ceil(respBody.length / 4);
     }
     for (const [from, to] of REVERSE_MAP) {
       respBody = respBody.replaceAll('"model":"' + from + '"', '"model":"' + to + '"');

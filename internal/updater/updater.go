@@ -3,6 +3,8 @@
 package updater
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path"
 	"runtime"
 	"strconv"
 	"strings"
@@ -116,13 +119,77 @@ func (r *Release) FindMSIURL() (string, error) {
 	return "", fmt.Errorf("no MSI found for %s in release %s", arch, r.TagName)
 }
 
+// FindChecksumURL returns the download URL for checksums.txt in the
+// release, if published (build.bat generates it starting with the
+// release that ships this check). Older releases predate it — callers
+// must treat a "not found" error as "skip verification", not fatal.
+func (r *Release) FindChecksumURL() (string, error) {
+	for _, a := range r.Assets {
+		if a.Name == "checksums.txt" {
+			return a.BrowserDownloadURL, nil
+		}
+	}
+	return "", fmt.Errorf("no checksums.txt in release %s", r.TagName)
+}
+
+// fetchChecksums downloads and parses a sha256sum-style checksums.txt
+// (lines of "<hex sha256>  <filename>", as produced by build.bat / the
+// Windows certutil -hashfile tool) into a filename → hash map.
+func fetchChecksums(url string) (map[string]string, error) {
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("checksums download failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("checksums download returned HTTP %d", resp.StatusCode)
+	}
+
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20)) // 1MB is far more than enough
+	if err != nil {
+		return nil, fmt.Errorf("checksums read failed: %w", err)
+	}
+
+	sums := make(map[string]string)
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) != 2 {
+			continue
+		}
+		sums[fields[1]] = strings.ToLower(fields[0])
+	}
+	return sums, nil
+}
+
 // DownloadAndInstall downloads the MSI to a temp file and launches it via
 // msiexec. The MSI installer handles the upgrade (WiX MajorUpgrade element).
 // The calling process exits so the installer can replace files.
+//
+// Integrity: if the release publishes a checksums.txt (see build.bat),
+// the downloaded MSI's SHA-256 is verified against it before msiexec is
+// invoked. This defends against corruption or tampering in transit —
+// it does NOT defend against a compromised release process or repo,
+// since checksums.txt is fetched from the same GitHub release as the
+// MSI. That would require code signing, which is out of scope here.
+// A missing checksums.txt (older releases) is a warning, not a hard
+// failure; a checksum MISMATCH against a present manifest IS a hard
+// failure and aborts the install.
 func (r *Release) DownloadAndInstall() error {
 	url, err := r.FindMSIURL()
 	if err != nil {
 		return err
+	}
+	msiName := path.Base(url)
+
+	var expectedSHA256 string
+	if checksumURL, cerr := r.FindChecksumURL(); cerr != nil {
+		log.Printf("updater: no checksums.txt published for release %s (continuing without verification): %v", r.TagName, cerr)
+	} else if sums, serr := fetchChecksums(checksumURL); serr != nil {
+		log.Printf("updater: warning — could not fetch checksums.txt: %v (continuing without verification)", serr)
+	} else if h, ok := sums[msiName]; ok {
+		expectedSHA256 = h
+	} else {
+		log.Printf("updater: warning — checksums.txt has no entry for %s (continuing without verification)", msiName)
 	}
 
 	log.Printf("updater: downloading %s", url)
@@ -144,11 +211,23 @@ func (r *Release) DownloadAndInstall() error {
 		return fmt.Errorf("cannot create temp file: %w", err)
 	}
 	msiPath := out.Name()
-	if _, err := io.Copy(out, limitedBody); err != nil {
+
+	hasher := sha256.New()
+	if _, err := io.Copy(io.MultiWriter(out, hasher), limitedBody); err != nil {
+		out.Close()
 		os.Remove(msiPath)
 		return fmt.Errorf("download write failed: %w", err)
 	}
 	out.Close()
+
+	if expectedSHA256 != "" {
+		got := hex.EncodeToString(hasher.Sum(nil))
+		if got != expectedSHA256 {
+			os.Remove(msiPath)
+			return fmt.Errorf("checksum mismatch for %s: expected %s, got %s — download may be corrupted or tampered with, aborting install", msiName, expectedSHA256, got)
+		}
+		log.Printf("updater: checksum verified for %s", msiName)
+	}
 
 	log.Printf("updater: launching MSI installer: %s", msiPath)
 	if err := exec.Command("msiexec", "/i", msiPath).Start(); err != nil {

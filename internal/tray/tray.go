@@ -359,14 +359,41 @@ func (t *trayApp) updateIcon() {
 	}
 }
 
+// guarded runs fn in a new goroutine, but only if mu isn't already held —
+// this is the single choke point that prevents every tray action from
+// opening duplicate windows. Every handler that shows a window or does
+// anything non-instant MUST go through this, not just the slow ones.
+// Without it, a user re-clicking a menu item while the first click's
+// dialog/network call is still being built fires a second, unguarded
+// ClickedCh event that races the first and opens a second window.
+func (t *trayApp) guarded(mu *sync.Mutex, name string, fn func()) {
+	if !mu.TryLock() {
+		log.Printf("%s: already in progress, skipping", name)
+		return
+	}
+	go func() {
+		defer mu.Unlock()
+		fn()
+	}()
+}
+
+var (
+	configMutex       sync.Mutex
+	testMutex         sync.Mutex
+	copyURLMutex      sync.Mutex
+	tunnelMutex       sync.Mutex
+	createTunnelMutex sync.Mutex
+	updateMutex       sync.Mutex
+)
+
 func (t *trayApp) handleMenu(mConfig, mConfigRaw, mTest, mCopyURL, mTunnel, mWorker, mCreateTunnel, mRegister, mStartup, mUpdate, mContact, mExit *systray.MenuItem) {
 	for {
 		select {
 		case <-mConfig.ClickedCh:
-			go func() {
+			t.guarded(&configMutex, "settings", func() {
 				cfg := t.manager.Get()
 				showSettingsDialogWalk(cfg, t.configPath, nil)
-			}()
+			})
 
 		case <-mConfigRaw.ClickedCh:
 			if err := exec.Command("notepad.exe", t.configPath).Start(); err != nil {
@@ -374,36 +401,22 @@ func (t *trayApp) handleMenu(mConfig, mConfigRaw, mTest, mCopyURL, mTunnel, mWor
 			}
 
 		case <-mTest.ClickedCh:
-			go t.testConnection()
+			t.guarded(&testMutex, "test connection", t.testConnection)
 
 		case <-mCopyURL.ClickedCh:
-			go t.copyBaseURL(mCopyURL)
+			t.guarded(&copyURLMutex, "copy url", func() { t.copyBaseURL(mCopyURL) })
 
 		case <-mTunnel.ClickedCh:
-			go t.toggleTunnel(mTunnel, mCopyURL)
+			t.guarded(&tunnelMutex, "tunnel toggle", func() { t.toggleTunnel(mTunnel, mCopyURL) })
 
 		case <-mWorker.ClickedCh:
-			if deployMutex.TryLock() {
-				go func() {
-					defer deployMutex.Unlock()
-					t.deployWorker(mCopyURL)
-				}()
-			} else {
-				log.Printf("deploy: already in progress, skipping")
-			}
+			t.guarded(&deployMutex, "deploy", func() { t.deployWorker(mCopyURL) })
 
 		case <-mCreateTunnel.ClickedCh:
-			go t.createNamedTunnel(mTunnel, mCopyURL)
+			t.guarded(&createTunnelMutex, "create tunnel", func() { t.createNamedTunnel(mTunnel, mCopyURL) })
 
 		case <-mRegister.ClickedCh:
-			if registerMutex.TryLock() {
-				go func() {
-					defer registerMutex.Unlock()
-					t.registerModels()
-				}()
-			} else {
-				log.Printf("register: already in progress, skipping")
-			}
+			t.guarded(&registerMutex, "register", t.registerModels)
 
 		case <-mStartup.ClickedCh:
 			nowOn := !mStartup.Checked()
@@ -416,7 +429,7 @@ func (t *trayApp) handleMenu(mConfig, mConfigRaw, mTest, mCopyURL, mTunnel, mWor
 			setAutoStart(nowOn)
 
 		case <-mUpdate.ClickedCh:
-			go t.installUpdate(mUpdate)
+			t.guarded(&updateMutex, "update", func() { t.installUpdate(mUpdate) })
 
 		case <-mContact.ClickedCh:
 			if err := exec.Command("rundll32", "url.dll,FileProtocolHandler",

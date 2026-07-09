@@ -70,12 +70,11 @@ type UpstreamConfig struct {
 	APIKey  string `toml:"-"` // injected from secrets.toml
 }
 
-// ProxyConfig holds the cursor-to-worker key. The Worker validates
-// this key, then swaps it for the real upstream key.
 // ProxyConfig holds the cursor-to-worker key and client identity.
 type ProxyConfig struct {
-	CursorKey string `toml:"-"`        // injected from secrets.toml
+	CursorKey string `toml:"-"`         // injected from secrets.toml
 	ClientID  string `toml:"client_id"` // empty = OS username
+	APIStyle  string `toml:"api_style"` // "openai" (default), "anthropic", or "both"
 }
 
 // TunnelConfig holds optional Cloudflare Named Tunnel settings.
@@ -169,12 +168,36 @@ func Load(path string) (*Config, error) {
 	if cfg.Cloudflare.WorkerName == "" {
 		cfg.Cloudflare.WorkerName = "z-api-proxy"
 	}
+	// Security: default verify_key to true. This intentionally applies
+	// on every load, not just to newly generated configs — a plain TOML
+	// bool can't distinguish "absent from the file" from "explicitly set
+	// to false" (Go zero value is false either way), so there is no way
+	// to flip the default for new installs without also affecting
+	// existing ones that have verify_key = false sitting in their
+	// config.toml from before this change.
+	//
+	// This is a deliberate secure-by-default trade-off: enforcement only
+	// ever activates once cfg.Upstream.APIKey is also set (see the `&&`
+	// gate in proxy.ServeHTTP), so anyone who hasn't configured an
+	// upstream API key sees no behavior change at all. Anyone who HAS
+	// configured a key and was relying on verify_key = false to keep
+	// their local/tunneled/Worker endpoint open with no key check will
+	// start being enforced on their next config reload (polled every 5s
+	// by Manager.watch, or on next app start). If that's genuinely
+	// wanted, the supported way to disable verification is to leave
+	// upstream.api_key empty in secrets.toml, not to set verify_key =
+	// false — but this closes that route for anyone still using it.
+	cfg.Security.VerifyKey = true
 	// Auto-fill client ID from OS username if empty.
 	if cfg.Proxy.ClientID == "" {
 		cfg.Proxy.ClientID = os.Getenv("USERNAME")
 		if cfg.Proxy.ClientID == "" {
 			cfg.Proxy.ClientID = "default"
 		}
+	}
+	// API style default: OpenAI only.
+	if cfg.Proxy.APIStyle == "" {
+		cfg.Proxy.APIStyle = "openai"
 	}
 
 	// WorkerStats defaults: enabled, 60s interval.
@@ -247,8 +270,13 @@ hostname = ""
 
 # Security: when true and api_key is set in secrets.toml, only requests
 # with the matching key are accepted. Others get 401.
+# NOTE: this value is currently always treated as true by Load() — see
+# the comment above the verify_key default in config.go. Enforcement
+# still only activates once upstream.api_key is set in secrets.toml; if
+# you want the local/tunneled/Worker endpoint open with no key check,
+# leave upstream.api_key empty instead of setting this to false.
 [security]
-verify_key = false
+verify_key = true
 
 # Cloudflare Worker deployment settings.
 # Deploy a stable Worker proxy via tray menu → Deploy Cloudflare Worker.

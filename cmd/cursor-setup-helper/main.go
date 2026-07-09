@@ -15,7 +15,6 @@ package main
 
 import (
 	"bufio"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -23,6 +22,7 @@ import (
 	"strings"
 
 	"z-api-proxy/internal/config"
+	"z-api-proxy/internal/cursor"
 )
 
 var modelNames = func() []string {
@@ -163,48 +163,28 @@ func maskKey(key string) string {
 	return key[:8] + "..." + key[len(key)-4:]
 }
 
-// applySettings reads, merges, and writes Cursor's settings.json.
+// applySettings backs up and then writes Cursor's settings.json. The
+// actual read/merge/write logic is shared with internal/cursor (used by
+// the tray app's "Configure Cursor" flow) via cursor.WriteSettingsJSON,
+// so the two call sites don't duplicate the JSON parsing, key
+// composition, and model-name dedup logic. clientID is passed as "" here
+// since this tool only deals with a single flat apiKey, not the
+// cursorKey/clientID split used elsewhere — WriteSettingsJSON's
+// `if clientID != ""` guard then leaves the key as apiKey with no
+// suffix, matching this tool's prior behavior exactly.
 func applySettings(settingsPath, proxyURL, apiKey string) error {
 	raw, err := os.ReadFile(settingsPath)
 	if err != nil {
 		return fmt.Errorf("cannot read settings: %w", err)
 	}
 
-	var settings map[string]interface{}
-	if err := json.Unmarshal(raw, &settings); err != nil {
-		return fmt.Errorf("cannot parse settings: %w", err)
-	}
-
-	settings["cursor.general.openaiApiBaseUrl"] = proxyURL
-	settings["cursor.general.enableOpenaiApiBaseUrl"] = true
-	settings["cursor.general.openaiApiKey"] = apiKey
-
-	// Merge model names (don't overwrite existing).
-	existing, _ := settings["cursor.general.modelNames"].([]interface{})
-	seen := make(map[string]bool)
-	for _, m := range existing {
-		if s, ok := m.(string); ok {
-			seen[s] = true
-		}
-	}
-	for _, m := range modelNames {
-		if !seen[m] {
-			existing = append(existing, m)
-		}
-	}
-	settings["cursor.general.modelNames"] = existing
-
-	// Backup original.
+	// Backup original before writing. 0600: settings.json (and thus this
+	// backup) may already contain a composite API key from a prior run.
 	backupPath := settingsPath + ".bak"
-	os.WriteFile(backupPath, raw, 0644)
+	os.WriteFile(backupPath, raw, 0600)
 
-	out, err := json.MarshalIndent(settings, "", "    ")
-	if err != nil {
-		return fmt.Errorf("cannot serialize settings: %w", err)
-	}
-
-	if err := os.WriteFile(settingsPath, out, 0644); err != nil {
-		return fmt.Errorf("cannot write settings: %w", err)
+	if err := cursor.WriteSettingsJSON(settingsPath, proxyURL, modelNames, apiKey, ""); err != nil {
+		return err
 	}
 
 	return nil

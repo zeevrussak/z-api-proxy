@@ -33,6 +33,13 @@ go vet ./...
 # Smoke test (integration, requires Python 3 + a running proxy instance)
 python test_smoke.py
 
+# Node.js unit tests for the Cloudflare Worker script (worker.js), executed
+# for real under Node — not re-implemented in Go. Catches JS-runtime bugs
+# (bad scoping, undefined vars) that Go-side worker_test.go cannot, because
+# that file only tests a Go re-implementation of the JS logic. Requires
+# Node.js 18+, no npm dependencies.
+node --test internal/worker/worker.test.mjs
+
 # Build MSI per-arch (requires WiX v4+ as dotnet tool: dotnet tool install -g wix)
 wix build installer.wxs -arch x64 -d MsiVersion=1.0.0 -d DisplayVersion=1.0.0-alpha \
     -d BinPath=build/amd64/z-api-proxy.exe -d UpgradeCode=18CAB0AD-AF9E-4C0B-AD01-99EF83004F7C \
@@ -40,6 +47,8 @@ wix build installer.wxs -arch x64 -d MsiVersion=1.0.0 -d DisplayVersion=1.0.0-al
 ```
 
 The app ships as **native binaries for both amd64 and arm64**. The NSIS installer detects the host architecture at install time via `PROCESSOR_ARCHITEW6432`. The MSIs are per-architecture. Both produce Start Menu shortcuts, ARP registry entries, and launch after install.
+
+`build.bat` also generates `releases/checksums.txt` (SHA-256 of every `.msi`/`.exe` in `releases/`, via `certutil -hashfile`). **You must upload `checksums.txt` as a release asset alongside the MSIs/installer when publishing to GitHub** — `updater.go`'s `DownloadAndInstall` looks for it by that exact name in the release and verifies the downloaded MSI's hash before running `msiexec`. A release without it still updates fine (verification is skipped with a log warning, for backward compat with pre-existing releases), it just isn't integrity-checked.
 
 **Version management**: the `VERSION` file (e.g. `1.0.0-alpha`) is the single source of truth. `build.bat` reads it and injects it into the Go binary (`-X main.version=...`), MSIs (display name + numeric version), and NSIS installer. MSI ProductVersion strips the pre-release suffix (`1.0.0-alpha` → numeric `1.0.0`).
 
@@ -105,6 +114,16 @@ If you add a new field that needs rewriting, extend the field list in `rewriteMo
 - Clipboard operations use `powershell Set-Clipboard` via `exec.Command`.
 - Contact Developer uses `rundll32 url.dll,FileProtocolHandler mailto:...` to open the default mail client.
 
+## Security Hardening Details
+
+A few security properties are easy to accidentally regress if you're not aware of them:
+
+- **`config.Security.VerifyKey` is force-enabled.** `Load()` unconditionally sets `cfg.Security.VerifyKey = true` regardless of what's in `config.toml` — a plain TOML bool can't distinguish "absent" from "explicitly false", so there was no way to flip the default for new installs without also re-enabling it for existing installs that had `verify_key = false` on disk. Enforcement itself still only activates once `cfg.Upstream.APIKey` is also set (see the `&&` gate in `proxy.ServeHTTP`), so this is a no-op for anyone without an upstream key configured — but it IS a behavior change for anyone who had both an API key set and `verify_key = false`. There is currently no supported way to run with an upstream key configured and verification off; if that's ever needed, it requires a real tri-state (e.g. `*bool`) instead of a plain bool, not just flipping this line back.
+- **`worker.js`'s `matchKey` does a constant-time comparison** (`timingSafeEqual`, XOR-accumulate over the full fixed-length key, no early exit) of the key portion, mirroring `proxy.go`'s use of `crypto/subtle.ConstantTimeCompare`. Only the length check and the `key + '_' + clientId` suffix parsing are ordinary (fast) string ops — length and clientId aren't secret. If you touch this function, preserve the "constant-time over content, fast-reject on length" split; don't reintroduce `===`/`startsWith` on the key portion itself.
+- **`worker.go`'s `TEST_KEY` is generated per-installation**, not a shared hardcoded constant. `loadOrCreateTestKey()` generates 24 random bytes via `crypto/rand` on first `Deploy()` and caches them at `%APPDATA%\Z-API-Proxy\worker-testkey.pref` (0600); `TestDeployedWorker` reads the same cached value. A Worker deployed before this existed (or from a different machine) will fail `/test` until the next `Deploy()` pushes a fresh `TEST_KEY` secret — this is expected, not a bug.
+- **`cursor.go`'s `writeSettingsJSON`** (and the equivalent `cmd/cursor-setup-helper/main.go` `applySettings`) write Cursor's `settings.json` with **0600**, not 0644 — it contains a composite API key (`cursorKey_clientID`) in plaintext. `state.vscdb` (Cursor's own SQLite state file) is intentionally left alone; it has its own lifecycle outside this app's control.
+- **Download integrity**: `tunnel.go`'s `ensureDownloaded()` verifies `cloudflared.exe`'s SHA-256 against the digest GitHub publishes for that release asset (`GET /repos/cloudflare/cloudflared/releases/latest`, the `assets[].digest` field — computed by GitHub at upload time, not scraped from release-note text) before treating it as trusted. `updater.go`'s `DownloadAndInstall()` does the same for MSIs against `checksums.txt` (see Commands section above). Both are **best-effort and fail open**: an unreachable API or a missing digest/manifest logs a warning and proceeds unverified rather than breaking the feature; a **mismatch** against a digest/manifest that IS present is always a hard failure. This defends against corruption or tampering in transit — it does NOT defend against a compromised upstream repo/release process (that needs code signing, out of scope here).
+
 ## Logging
 
 Logs go to `%APPDATA%\Z-API-Proxy\proxy.log` (append mode), **not** stdout — there is no console because of `-H windowsgui`. When debugging a deployed build, read that file. A failed log-file open is silently ignored (logging falls back to stderr, which is invisible in a GUI app).
@@ -117,4 +136,5 @@ Logs go to `%APPDATA%\Z-API-Proxy\proxy.log` (append mode), **not** stdout — t
 - Style: short receiver names (`p *Proxy`, `m *Manager`, `t *trayApp`, `c *Counter`), exported constructors named `New`.
 - Version is managed via the `VERSION` file and injected at build time with `-X main.version=...`.
 - Release artifacts use `win` in their names (e.g. `z-api-proxy-win-1.0.0-alpha-amd64.msi`).
-- Tests: `go test ./...` runs unit tests in `config` and `updater`. The Python `test_smoke.py` is a separate integration test.
+- Tests: `go test ./...` runs unit tests in `config`, `tray`, `tunnel`, `updater`, and `worker` (the Go-side, logic-only re-implementation tests). The Python `test_smoke.py` is a separate integration test. `internal/worker/worker.test.mjs` is a separate Node.js test that executes the real `worker.js` (see Commands) — run it whenever you touch `worker.js`; the Go tests next to it do not exercise actual JS runtime semantics. Tests that touch `config.AppConfigDir()` (e.g. `worker`'s test-key persistence tests) sandbox it with `t.Setenv("APPDATA", t.TempDir())` — do the same for any new test that writes app state, don't let tests touch the real user's `%APPDATA%\Z-API-Proxy\`.
+- Tray menu handlers that open a window or do anything non-instant MUST go through the `guarded(mu, name, fn)` helper in `tray.go` (`select` loop in `handleMenu`). Every tray `ClickedCh` case is a `select`/`default` non-blocking send from `getlantern/systray` — a user re-clicking a menu item while the first click's dialog is still being built fires a second event that races the first `go func(){}()` and opens a second native window. Each handler needs its own dedicated `sync.Mutex` (see `deployMutex`, `registerMutex`, `configMutex`, etc.) — do not skip this for "fast" actions; slow-feeling ones (dialog construction, network calls) are exactly the ones users double-click.

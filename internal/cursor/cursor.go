@@ -136,6 +136,15 @@ func RegisterModels(proxyURL string, modelNames []string, cursorKey, clientID st
 	return settingsPath, nil
 }
 
+// WriteSettingsJSON is the exported entry point for the settings.json
+// merge/write logic, shared with cmd/cursor-setup-helper so that tool
+// doesn't duplicate this package's parsing, key-composition, and model
+// dedup logic. It is a thin wrapper around the unexported implementation
+// used internally by RegisterModels.
+func WriteSettingsJSON(settingsPath, proxyURL string, modelNames []string, cursorKey, clientID string) error {
+	return writeSettingsJSON(settingsPath, proxyURL, modelNames, cursorKey, clientID)
+}
+
 // writeSettingsJSON writes the OpenAI API override settings.
 func writeSettingsJSON(settingsPath, proxyURL string, modelNames []string, cursorKey, clientID string) error {
 	raw, err := os.ReadFile(settingsPath)
@@ -177,7 +186,9 @@ func writeSettingsJSON(settingsPath, proxyURL string, modelNames []string, curso
 		return fmt.Errorf("cannot serialize settings: %w", err)
 	}
 
-	return os.WriteFile(settingsPath, out, 0644)
+	// 0600: settings.json now contains a composite API key
+	// (cursorKey_clientID) — don't leave it world/group-readable.
+	return os.WriteFile(settingsPath, out, 0600)
 }
 
 // writeStateDB writes model names into Cursor's state.vscdb SQLite.

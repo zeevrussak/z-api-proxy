@@ -14,7 +14,9 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -34,7 +36,59 @@ import (
 const (
 	cloudflaredDownloadBase = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-"
 	cloudflaredExeName      = "cloudflared.exe"
+	cloudflaredReleaseAPI   = "https://api.github.com/repos/cloudflare/cloudflared/releases/latest"
 )
+
+// cloudflaredAsset mirrors the subset of a GitHub release asset we need
+// for integrity verification. Digest is computed by GitHub itself at
+// upload time (format "sha256:<hex>") — a stable, documented API field,
+// not scraped from release-note text.
+type cloudflaredAsset struct {
+	Name               string `json:"name"`
+	BrowserDownloadURL string `json:"browser_download_url"`
+	Digest             string `json:"digest"`
+}
+
+type cloudflaredRelease struct {
+	TagName string             `json:"tag_name"`
+	Assets  []cloudflaredAsset `json:"assets"`
+}
+
+// cloudflaredReleaseAPIOverride and cloudflaredDownloadBaseOverride let
+// tests redirect the release-metadata lookup and binary download to a
+// local test server instead of the real GitHub API/CDN.
+var (
+	cloudflaredReleaseAPIOverride   = cloudflaredReleaseAPI
+	cloudflaredDownloadBaseOverride = cloudflaredDownloadBase
+)
+
+// fetchCloudflaredRelease queries the GitHub Releases API for metadata
+// about the latest cloudflared release.
+func fetchCloudflaredRelease() (*cloudflaredRelease, error) {
+	req, err := http.NewRequest("GET", cloudflaredReleaseAPIOverride, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("User-Agent", "z-api-proxy")
+
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("github api request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("github api returned HTTP %d", resp.StatusCode)
+	}
+
+	var rel cloudflaredRelease
+	if err := json.NewDecoder(resp.Body).Decode(&rel); err != nil {
+		return nil, fmt.Errorf("cannot parse github api response: %w", err)
+	}
+	return &rel, nil
+}
 
 // tunnelURLPattern matches the trycloudflare.com URL printed by cloudflared.
 var tunnelURLPattern = regexp.MustCompile(`https://[a-z0-9-]+\.trycloudflare\.com`)
@@ -98,6 +152,17 @@ func (m *Manager) IsDownloaded() bool {
 }
 
 // ensureDownloaded downloads cloudflared.exe if not already cached.
+//
+// Integrity: before trusting and executing the downloaded binary, its
+// SHA-256 is checked against the digest GitHub publishes for that exact
+// release asset. This defends against corruption or tampering in
+// transit (e.g. a compromised CDN/proxy on the network path) — it does
+// NOT defend against a compromised cloudflare/cloudflared GitHub repo or
+// release process itself, since we trust the same GitHub API for both
+// the binary and its expected digest. Verification is best-effort: if
+// the GitHub API is unreachable or a future release omits the digest
+// field, we log a warning and fall back to downloading unverified
+// rather than breaking the tunnel feature entirely.
 func (m *Manager) ensureDownloaded() error {
 	if m.IsDownloaded() {
 		return nil
@@ -107,7 +172,26 @@ func (m *Manager) ensureDownloaded() error {
 	if runtime.GOARCH == "arm64" {
 		arch = "arm64"
 	}
-	url := cloudflaredDownloadBase + arch + ".exe"
+	assetName := "cloudflared-windows-" + arch + ".exe"
+	url := cloudflaredDownloadBaseOverride + arch + ".exe"
+
+	var expectedSHA256 string
+	if rel, err := fetchCloudflaredRelease(); err != nil {
+		log.Printf("tunnel: warning — could not fetch cloudflared release metadata for checksum verification: %v (continuing without verification)", err)
+	} else {
+		for _, a := range rel.Assets {
+			if a.Name == assetName {
+				expectedSHA256 = strings.ToLower(strings.TrimPrefix(a.Digest, "sha256:"))
+				if a.BrowserDownloadURL != "" {
+					url = a.BrowserDownloadURL
+				}
+				break
+			}
+		}
+		if expectedSHA256 == "" {
+			log.Printf("tunnel: warning — no published digest found for %s (continuing without verification)", assetName)
+		}
+	}
 
 	log.Printf("tunnel: downloading cloudflared from %s", url)
 
@@ -128,15 +212,35 @@ func (m *Manager) ensureDownloaded() error {
 	limitedBody := io.LimitReader(resp.Body, maxDownloadSize)
 
 	exePath := m.cloudflaredPath()
-	out, err := os.Create(exePath)
+	// Write to a temp path first so a checksum failure (or a crash/kill
+	// mid-download) never leaves a partially-written or unverified file
+	// at the real cloudflaredPath — IsDownloaded() only checks existence.
+	tmpPath := exePath + ".download"
+	out, err := os.Create(tmpPath)
 	if err != nil {
 		return fmt.Errorf("cannot create file: %w", err)
 	}
-	defer out.Close()
 
-	if _, err := io.Copy(out, limitedBody); err != nil {
-		os.Remove(exePath)
+	hasher := sha256.New()
+	if _, err := io.Copy(io.MultiWriter(out, hasher), limitedBody); err != nil {
+		out.Close()
+		os.Remove(tmpPath)
 		return fmt.Errorf("download write failed: %w", err)
+	}
+	out.Close()
+
+	if expectedSHA256 != "" {
+		got := hex.EncodeToString(hasher.Sum(nil))
+		if got != expectedSHA256 {
+			os.Remove(tmpPath)
+			return fmt.Errorf("checksum mismatch for %s: expected %s, got %s — download may be corrupted or tampered with, refusing to run it", assetName, expectedSHA256, got)
+		}
+		log.Printf("tunnel: checksum verified for %s", assetName)
+	}
+
+	if err := os.Rename(tmpPath, exePath); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("cannot finalize download: %w", err)
 	}
 
 	log.Printf("tunnel: cloudflared saved to %s", exePath)
@@ -362,6 +466,11 @@ type TunnelCreationResult struct {
 
 const cfAPIBase = "https://api.cloudflare.com/client/v4"
 
+// cfAPIBaseOverride lets tests redirect CreateNamedTunnelViaAPI's calls to
+// a local test server instead of the real Cloudflare API, mirroring
+// cloudflaredReleaseAPIOverride/cloudflaredDownloadBaseOverride above.
+var cfAPIBaseOverride = cfAPIBase
+
 // CreateNamedTunnelViaAPI creates a Cloudflare Named Tunnel via the REST API,
 // configures ingress rules, and sets up DNS — all automatically.
 //
@@ -403,7 +512,7 @@ func CreateNamedTunnelViaAPI(accountID, apiToken, hostname, listenAddr string) (
 		"config_src":    "cloudflare",
 	})
 
-	createURL := fmt.Sprintf("%s/accounts/%s/cfd_tunnel", cfAPIBase, accountID)
+	createURL := fmt.Sprintf("%s/accounts/%s/cfd_tunnel", cfAPIBaseOverride, accountID)
 	req, _ := http.NewRequest("POST", createURL, bytes.NewReader(createBody))
 	req.Header.Set("Authorization", "Bearer "+apiToken)
 	req.Header.Set("Content-Type", "application/json")
@@ -440,7 +549,7 @@ func CreateNamedTunnelViaAPI(accountID, apiToken, hostname, listenAddr string) (
 
 	if token == "" {
 		// Some API versions return the token differently — try the connector token endpoint.
-		tokenURL := fmt.Sprintf("%s/accounts/%s/cfd_tunnel/%s/token", cfAPIBase, accountID, tunnelID)
+		tokenURL := fmt.Sprintf("%s/accounts/%s/cfd_tunnel/%s/token", cfAPIBaseOverride, accountID, tunnelID)
 		tokReq, _ := http.NewRequest("GET", tokenURL, nil)
 		tokReq.Header.Set("Authorization", "Bearer "+apiToken)
 		tokResp, err := client.Do(tokReq)
@@ -476,7 +585,7 @@ func CreateNamedTunnelViaAPI(accountID, apiToken, hostname, listenAddr string) (
 		},
 	})
 
-	ingressURL := fmt.Sprintf("%s/accounts/%s/cfd_tunnel/%s/configurations", cfAPIBase, accountID, tunnelID)
+	ingressURL := fmt.Sprintf("%s/accounts/%s/cfd_tunnel/%s/configurations", cfAPIBaseOverride, accountID, tunnelID)
 	ingReq, _ := http.NewRequest("PUT", ingressURL, bytes.NewReader(ingressBody))
 	ingReq.Header.Set("Authorization", "Bearer "+apiToken)
 	ingReq.Header.Set("Content-Type", "application/json")
@@ -496,7 +605,7 @@ func CreateNamedTunnelViaAPI(accountID, apiToken, hostname, listenAddr string) (
 	log.Printf("tunnel-api: ingress configured")
 
 	// 5. Look up the zone ID for the domain.
-	zoneURL := fmt.Sprintf("%s/zones?name=%s", cfAPIBase, domain)
+	zoneURL := fmt.Sprintf("%s/zones?name=%s", cfAPIBaseOverride, domain)
 	zoneReq, _ := http.NewRequest("GET", zoneURL, nil)
 	zoneReq.Header.Set("Authorization", "Bearer "+apiToken)
 	zoneResp, err := client.Do(zoneReq)
@@ -521,7 +630,7 @@ func CreateNamedTunnelViaAPI(accountID, apiToken, hostname, listenAddr string) (
 	cnameTarget := fmt.Sprintf("%s.cfargotunnel.com", tunnelID)
 
 	// Check if a record already exists.
-	dnsURL := fmt.Sprintf("%s/zones/%s/dns_records?name=%s", cfAPIBase, zoneID, hostname)
+	dnsURL := fmt.Sprintf("%s/zones/%s/dns_records?name=%s", cfAPIBaseOverride, zoneID, hostname)
 	dnsReq, _ := http.NewRequest("GET", dnsURL, nil)
 	dnsReq.Header.Set("Authorization", "Bearer "+apiToken)
 	dnsResp, err := client.Do(dnsReq)
@@ -537,7 +646,7 @@ func CreateNamedTunnelViaAPI(accountID, apiToken, hostname, listenAddr string) (
 		if len(existingDNS.Result) > 0 {
 			// Delete existing record, we'll recreate it.
 			for _, rec := range existingDNS.Result {
-				delURL := fmt.Sprintf("%s/zones/%s/dns_records/%s", cfAPIBase, zoneID, rec.ID)
+				delURL := fmt.Sprintf("%s/zones/%s/dns_records/%s", cfAPIBaseOverride, zoneID, rec.ID)
 				delReq, _ := http.NewRequest("DELETE", delURL, nil)
 				delReq.Header.Set("Authorization", "Bearer "+apiToken)
 				delResp, err := client.Do(delReq)
@@ -555,7 +664,7 @@ func CreateNamedTunnelViaAPI(accountID, apiToken, hostname, listenAddr string) (
 		"content": cnameTarget,
 		"proxied": true,
 	})
-	dnsCreateURL := fmt.Sprintf("%s/zones/%s/dns_records", cfAPIBase, zoneID)
+	dnsCreateURL := fmt.Sprintf("%s/zones/%s/dns_records", cfAPIBaseOverride, zoneID)
 	dnsCreateReq, _ := http.NewRequest("POST", dnsCreateURL, bytes.NewReader(dnsCreateBody))
 	dnsCreateReq.Header.Set("Authorization", "Bearer "+apiToken)
 	dnsCreateReq.Header.Set("Content-Type", "application/json")

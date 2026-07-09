@@ -141,7 +141,7 @@ echo [4/5] Building NSIS installer...
 where makensis >nul 2>&1
 if %ERRORLEVEL% neq 0 (
     echo WARNING: makensis not found on PATH, skipping NSIS installer.
-    goto :summary
+    goto :checksums
 )
 makensis /DAPPVERSION=%VERSION% installer.nsi
 if %ERRORLEVEL% neq 0 (
@@ -150,6 +150,24 @@ if %ERRORLEVEL% neq 0 (
 )
 move /Y z-api-proxy-win-setup.exe "releases\z-api-proxy-win-%VERSION%-setup.exe" >nul
 echo       z-api-proxy-win-%VERSION%-setup.exe
+
+:checksums
+:: --- Generate SHA-256 checksums for all release artifacts ---
+:: Consumed by updater.go (DownloadAndInstall) to verify MSI integrity
+:: before running msiexec. IMPORTANT: when publishing the GitHub release,
+:: upload checksums.txt as a release asset alongside the MSIs/installer —
+:: updater.go looks for it by that exact name in the same release.
+echo.
+echo [5/6] Generating checksums.txt...
+if exist releases\checksums.txt del /f /q releases\checksums.txt
+for %%f in (releases\*.msi releases\*.exe) do (
+    set "HASH="
+    for /f "skip=1 tokens=1" %%h in ('certutil -hashfile "%%f" SHA256 2^>nul') do (
+        if not defined HASH set "HASH=%%h"
+    )
+    echo !HASH!  %%~nxf>>releases\checksums.txt
+)
+echo       checksums.txt ^(sha256sum-compatible^)
 
 :summary
 echo.

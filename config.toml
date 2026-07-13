@@ -25,6 +25,19 @@ verify_key = false
 account_id = ""
 worker_name = "z-api-proxy"
 
+# If your api_token (secrets.toml) has a Client IP Address Filtering
+# restriction and your external IP changes periodically (e.g. dynamic
+# residential IP), set this to true to have Z-API Proxy keep the
+# token's allowed IP in sync automatically (polled every few minutes).
+# Requires the token to already have "User API Tokens: Edit"
+# permission on itself. NOTE: if the token's IP restriction has
+# already drifted to exclude this machine's current IP before you
+# enable this, the token is locked out of the API entirely (including
+# the self-update call) — you must first fix the restriction manually
+# in the Cloudflare dashboard to include the current IP, after which
+# this feature keeps it in sync going forward.
+auto_update_client_ip = false
+
 # Model name mappings.
 # "from" = model name as sent by Cursor
 # "to"   = model name as expected by z.ai upstream

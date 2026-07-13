@@ -274,6 +274,14 @@ func (t *trayApp) onReady() {
 		go t.pollWorkerStats(cfg.WorkerStats.Interval)
 	}
 
+	// Start the Cloudflare token client-IP poller unconditionally — it
+	// re-reads cfg.Cloudflare.AutoUpdateClientIP from the live config on
+	// every tick (see pollClientIP), so toggling the setting in
+	// config.toml takes effect on the next tick without a restart. This
+	// mirrors how the proxy itself always calls manager.Get() per
+	// request rather than caching a snapshot.
+	go t.pollClientIP()
+
 	// Auto-start: prefer Worker URL. If no Worker deployed, try tunnel.
 	if loadWorkerURL() == "" && loadTunnelPref() {
 		go t.autoStartTunnel(mTunnel, mCopyURL)
@@ -312,6 +320,48 @@ func (t *trayApp) fetchWorkerStats() {
 	t.workerTotal.Store(stats.TotalRequests)
 	t.workerSuccess.Store(stats.SuccessCount)
 	t.workerErrors.Store(stats.ErrorCount)
+}
+
+// clientIPPollInterval controls how often the tray checks whether this
+// machine's external IP has changed and, if so, updates the Cloudflare
+// API token's IP restriction to match (see worker.UpdateClientIPIfChanged).
+// 10 minutes is intentionally not aggressive: an external IP lease
+// change is a slow, infrequent event (typically hours to days apart
+// for a residential ISP), this poll makes a request to Cloudflare's
+// trace endpoint every tick regardless of whether anything changed,
+// and — unlike the read-only Worker stats poll — a detected change
+// here triggers a *mutating* call against the user's own API token.
+// 10 minutes bounds how long the token can be locked out after an IP
+// change (worst case) without polling aggressively enough to look like
+// abuse or waste the token's rate limit budget.
+const clientIPPollInterval = 10 * time.Minute
+
+// pollClientIP periodically calls worker.UpdateClientIPIfChanged with
+// the *current* live config (via t.manager.Get(), read fresh on every
+// tick — config is hot-reloaded, so a stale snapshot could poll with a
+// no-longer-current APIToken or an out-of-date AutoUpdateClientIP
+// setting). It runs unconditionally: gating on whether the feature is
+// enabled happens inside UpdateClientIPIfChanged itself, so flipping
+// auto_update_client_ip in config.toml takes effect on the very next
+// tick without restarting the app.
+//
+// Errors are logged, never fatal — this must never take down the tray
+// or the proxy, however badly the Cloudflare API call fails.
+func (t *trayApp) pollClientIP() {
+	ticker := time.NewTicker(clientIPPollInterval)
+	defer ticker.Stop()
+
+	t.checkClientIP()
+	for range ticker.C {
+		t.checkClientIP()
+	}
+}
+
+func (t *trayApp) checkClientIP() {
+	cfg := t.manager.Get()
+	if err := worker.UpdateClientIPIfChanged(cfg); err != nil {
+		log.Printf("client ip: %v", err)
+	}
 }
 
 func (t *trayApp) updateTooltip() {
@@ -455,8 +505,24 @@ func (t *trayApp) toggleTunnel(mTunnel, mCopyURL *systray.MenuItem) {
 		return
 	}
 
-	_, ok := showTunnelWindowWalkV2(t.tunnel)
-	if ok {
+	r := showProcessDialog("Z-API Proxy — Starting Tunnel", "Starting public tunnel", func(progress func(string)) ProcessResult {
+		progress("Starting cloudflared tunnel...")
+		url, err := t.tunnel.Start()
+		if err != nil {
+			return ProcessResult{
+				Success: false,
+				Title:   "Z-API Proxy — Tunnel Failed",
+				Summary: "Failed to start tunnel:\n\n" + err.Error(),
+			}
+		}
+		return ProcessResult{
+			Success: true,
+			Title:   "Z-API Proxy — Tunnel Started",
+			Summary: formatTunnelStartSummary(url),
+		}
+	})
+
+	if r.Success {
 		saveTunnelPref(true)
 		mTunnel.SetTitle("Stop Public Tunnel")
 		mCopyURL.SetTitle("Copy Public Tunnel URL")
@@ -482,31 +548,53 @@ func (t *trayApp) testConnection() {
 	cfg := t.manager.Get()
 	url := strings.TrimSuffix(cfg.Upstream.BaseURL, "/") + "/models"
 
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		messageBox("Failed to build request:\n"+err.Error(), "Z-API Proxy — Test", mbIconError)
-		return
-	}
-	if cfg.Upstream.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+cfg.Upstream.APIKey)
-	}
+	showProcessDialog("Z-API Proxy — Test Connection", "Testing upstream connection", func(progress func(string)) ProcessResult {
+		progress("Connecting to upstream...")
 
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		messageBox("Connection failed:\n"+err.Error(), "Z-API Proxy — Test", mbIconError)
-		return
-	}
-	defer resp.Body.Close()
+		req, err := http.NewRequest("GET", url, nil)
+		if err != nil {
+			return ProcessResult{
+				Success: false,
+				Title:   "Z-API Proxy — Test Failed",
+				Summary: "Failed to build request:\n" + err.Error(),
+			}
+		}
+		if cfg.Upstream.APIKey != "" {
+			req.Header.Set("Authorization", "Bearer "+cfg.Upstream.APIKey)
+		}
 
-	switch {
-	case resp.StatusCode == 200:
-		messageBox("Connection successful.\nUpstream is reachable and authenticated.", "Z-API Proxy — Test", mbIconInfo)
-	case resp.StatusCode == 401 || resp.StatusCode == 403:
-		messageBox("Upstream is reachable.\nHTTP 401 — authentication required.\nIf api_key is empty, the proxy passes through the key from Cursor at runtime.", "Z-API Proxy — Test", mbIconInfo)
-	default:
-		messageBox(fmt.Sprintf("Upstream is reachable.\nHTTP %d", resp.StatusCode), "Z-API Proxy — Test", mbIconWarning)
-	}
+		client := &http.Client{Timeout: 10 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			return ProcessResult{
+				Success: false,
+				Title:   "Z-API Proxy — Test Failed",
+				Summary: "Connection failed:\n" + err.Error(),
+			}
+		}
+		defer resp.Body.Close()
+
+		switch {
+		case resp.StatusCode == 200:
+			return ProcessResult{
+				Success: true,
+				Title:   "Z-API Proxy — Test Successful",
+				Summary: "Connection successful.\nUpstream is reachable and authenticated.",
+			}
+		case resp.StatusCode == 401 || resp.StatusCode == 403:
+			return ProcessResult{
+				Success: true,
+				Title:   "Z-API Proxy — Test",
+				Summary: "Upstream is reachable.\nHTTP 401 — authentication required.\nIf api_key is empty, the proxy passes through the key from Cursor at runtime.",
+			}
+		default:
+			return ProcessResult{
+				Success: false,
+				Title:   "Z-API Proxy — Test",
+				Summary: fmt.Sprintf("Upstream is reachable.\nHTTP %d", resp.StatusCode),
+			}
+		}
+	})
 }
 
 // copyBaseURL writes the active base URL to the Windows clipboard.
@@ -562,24 +650,42 @@ func (t *trayApp) checkForUpdates(mUpdate *systray.MenuItem) {
 // architecture. The app exits after launching so the installer can replace
 // files.
 func (t *trayApp) installUpdate(mUpdate *systray.MenuItem) {
-	mUpdate.SetTitle("Downloading update...")
+	r := showProcessDialog("Z-API Proxy — Update", "Checking for the latest release", func(progress func(string)) ProcessResult {
+		mUpdate.SetTitle("Downloading update...")
+		progress("Checking for the latest release...")
 
-	rel, err := updater.FetchLatest()
-	if err != nil {
-		mUpdate.SetTitle("Update failed — see log")
-		log.Printf("updater: %v", err)
-		return
+		rel, err := updater.FetchLatest()
+		if err != nil {
+			mUpdate.SetTitle("Update failed — see log")
+			log.Printf("updater: %v", err)
+			return ProcessResult{
+				Success: false,
+				Title:   "Z-API Proxy — Update Failed",
+				Summary: "Failed to check for updates:\n" + err.Error(),
+			}
+		}
+
+		progress("Downloading and verifying installer...")
+		if err := rel.DownloadAndInstall(); err != nil {
+			mUpdate.SetTitle("Update failed — see log")
+			return ProcessResult{
+				Success: false,
+				Title:   "Z-API Proxy — Update Failed",
+				Summary: "Update download failed:\n" + err.Error(),
+			}
+		}
+
+		return ProcessResult{
+			Success: true,
+			Title:   "Z-API Proxy — Update Downloaded",
+			Summary: "Update downloaded. The installer will now launch.\nThe app will exit and restart after installation.",
+		}
+	})
+
+	if r.Success {
+		t.tunnel.Stop()
+		systray.Quit()
 	}
-
-	if err := rel.DownloadAndInstall(); err != nil {
-		mUpdate.SetTitle("Update failed — see log")
-		messageBox("Update download failed:\n"+err.Error(), "Z-API Proxy — Update", mbIconError)
-		return
-	}
-
-	messageBox("Update downloaded. The installer will now launch.\nThe app will exit and restart after installation.", "Z-API Proxy — Update", mbIconInfo)
-	t.tunnel.Stop()
-	systray.Quit()
 }
 
 var deployMutex sync.Mutex
@@ -759,47 +865,48 @@ func (t *trayApp) createNamedTunnel(mTunnel, mCopyURL *systray.MenuItem) {
 	hostname := strings.TrimPrefix(strings.TrimPrefix(cfg.Tunnel.Hostname, "https://"), "http://")
 	listenAddr := cfg.Server.Listen
 
-	result, err := tunnel.CreateNamedTunnelViaAPI(
-		cfg.Cloudflare.AccountID, cfg.Cloudflare.APIToken, hostname, listenAddr,
-	)
-	if err != nil {
-		log.Printf("create named tunnel error: %v", err)
-		messageBox("Failed to create named tunnel:\n\n"+err.Error(),
-			"Z-API Proxy — Tunnel", mbIconError)
-		return
-	}
+	showProcessDialog("Z-API Proxy — Creating Tunnel", "Creating named tunnel via Cloudflare", func(progress func(string)) ProcessResult {
+		progress("Creating tunnel and configuring DNS...")
+		result, err := tunnel.CreateNamedTunnelViaAPI(
+			cfg.Cloudflare.AccountID, cfg.Cloudflare.APIToken, hostname, listenAddr,
+		)
+		if err != nil {
+			log.Printf("create named tunnel error: %v", err)
+			return ProcessResult{
+				Success: false,
+				Title:   "Z-API Proxy — Tunnel Failed",
+				Summary: "Failed to create named tunnel:\n\n" + err.Error(),
+			}
+		}
 
-	log.Printf("named tunnel created: ID=%s, hostname=%s", result.TunnelID, result.Hostname)
+		log.Printf("named tunnel created: ID=%s, hostname=%s", result.TunnelID, result.Hostname)
 
-	// Save the token to secrets.toml and hostname to config.
-	secretsPath := config.DefaultSecretsPath()
-	secData, err := os.ReadFile(secretsPath)
-	if err != nil {
-		secData = []byte{}
-	}
-	// Update the tunnel token in secrets.toml.
-	secText := string(secData)
-	// Simple replacement: find [tunnel] section and replace token line.
-	secText = updateTOMLValue(secText, "[tunnel]", "token", result.Token)
-	if err := os.WriteFile(secretsPath, []byte(secText), 0600); err != nil {
-		log.Printf("failed to write secrets: %v", err)
-	}
+		progress("Saving tunnel token...")
+		// Save the token to secrets.toml and hostname to config.
+		secretsPath := config.DefaultSecretsPath()
+		secData, err := os.ReadFile(secretsPath)
+		if err != nil {
+			secData = []byte{}
+		}
+		// Update the tunnel token in secrets.toml.
+		secText := string(secData)
+		// Simple replacement: find [tunnel] section and replace token line.
+		secText = updateTOMLValue(secText, "[tunnel]", "token", result.Token)
+		if err := os.WriteFile(secretsPath, []byte(secText), 0600); err != nil {
+			log.Printf("failed to write secrets: %v", err)
+		}
 
-	// Update config mode to "named".
-	mTunnel.SetTitle("Stop Public Tunnel")
-	mCopyURL.SetTitle("Copy Tunnel URL")
-	saveTunnelPref(true)
+		// Update config mode to "named".
+		mTunnel.SetTitle("Stop Public Tunnel")
+		mCopyURL.SetTitle("Copy Tunnel URL")
+		saveTunnelPref(true)
 
-	messageBox(
-		fmt.Sprintf("Named tunnel created successfully!\n\n"+
-			"Tunnel ID: %s\n"+
-			"Hostname: %s\n"+
-			"\n"+
-			"The tunnel connector token has been saved to secrets.toml.\n"+
-			"The app will now use this tunnel for all traffic.\n\n"+
-			"Use in Cursor: %s/v1",
-			result.TunnelID, result.Hostname, result.Hostname),
-		"Z-API Proxy — Tunnel", mbIconInfo)
+		return ProcessResult{
+			Success: true,
+			Title:   "Z-API Proxy — Tunnel Created",
+			Summary: formatTunnelSummary(result.TunnelID, result.Hostname),
+		}
+	})
 }
 
 // updateTOMLValue replaces or adds a key=value line under the given section.

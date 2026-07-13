@@ -70,11 +70,22 @@ func TestFormatRegisterSummary(t *testing.T) {
 	}
 }
 
-// TestFormatTunnelSummary verifies tunnel summary formatting.
+// TestFormatTunnelSummary verifies named tunnel summary formatting.
 func TestFormatTunnelSummary(t *testing.T) {
-	s := formatTunnelSummary("proxy.example.com")
+	s := formatTunnelSummary("tun-123", "proxy.example.com")
 	if !containsStr(s, "proxy.example.com") {
 		t.Error("tunnel summary missing hostname")
+	}
+	if !containsStr(s, "tun-123") {
+		t.Error("tunnel summary missing tunnel ID")
+	}
+}
+
+// TestFormatTunnelStartSummary verifies quick-tunnel-start summary formatting.
+func TestFormatTunnelStartSummary(t *testing.T) {
+	s := formatTunnelStartSummary("https://random-name.trycloudflare.com")
+	if !containsStr(s, "random-name.trycloudflare.com") {
+		t.Error("tunnel start summary missing URL")
 	}
 }
 

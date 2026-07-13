@@ -16,6 +16,7 @@ package main
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"log"
 	"net/http"
 	"os"
@@ -26,6 +27,7 @@ import (
 	"z-api-proxy/internal/config"
 	"z-api-proxy/internal/counter"
 	"z-api-proxy/internal/proxy"
+	"z-api-proxy/internal/singleinstance"
 	"z-api-proxy/internal/tray"
 )
 
@@ -41,9 +43,28 @@ var iconError []byte
 
 func main() {
 	// --test-ui flag: launch settings window and close after 2s.
+	// Skips the single-instance lock so UI tests can run while a tray
+	// instance is already up.
 	if len(os.Args) > 1 && os.Args[1] == "--test-ui" {
 		os.Exit(testUISettings())
 	}
+
+	// --test-progress flag: exercises the progress-window mechanism
+	// (progressWindow/showProcessDialog) end-to-end, verifying it never
+	// opens more than one window per operation. See ShowProcessDialogForTest.
+	if len(os.Args) > 1 && os.Args[1] == "--test-progress" {
+		os.Exit(testUIProgressWindow())
+	}
+
+	inst, err := singleinstance.Acquire("")
+	if err != nil {
+		if errors.Is(err, singleinstance.ErrAlreadyRunning) {
+			singleinstance.NotifyAlreadyRunning()
+			os.Exit(0)
+		}
+		log.Fatalf("single-instance lock: %v", err)
+	}
+	defer inst.Release()
 
 	logPath := filepath.Join(config.AppConfigDir(), "proxy.log")
 	logFile, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
@@ -127,5 +148,18 @@ func testUISettings() int {
 		return 0
 	}
 	log.Println("UI test FAILED: window did not open")
+	return 1
+}
+
+// testUIProgressWindow drives a real progress window through several
+// status updates and verifies exactly one native window ever exists for
+// it. Returns 0 on success, 1 on failure. Used by the --test-progress CLI
+// flag and by the automated UI test.
+func testUIProgressWindow() int {
+	if tray.ShowProcessDialogForTest() {
+		log.Println("UI test: progress window showed exactly one window across multiple updates")
+		return 0
+	}
+	log.Println("UI test FAILED: progress window opened more than once, or was never observed")
 	return 1
 }

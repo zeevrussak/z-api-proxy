@@ -98,6 +98,13 @@ type CloudflareConfig struct {
 	WorkerName      string `toml:"worker_name"`
 	WorkerHostname  string `toml:"worker_hostname"`
 	EnableLogging   bool   `toml:"enable_logging"`
+	// AutoUpdateClientIP opts into a background poller (see
+	// internal/worker/clientip.go) that keeps api_token's Client IP
+	// Address Filtering condition in sync with this machine's current
+	// external IP, so a dynamic/residential IP doesn't silently lock
+	// the token out. Off by default: it mutates the token via the
+	// Cloudflare API, so it should be an explicit opt-in.
+	AutoUpdateClientIP bool `toml:"auto_update_client_ip"`
 }
 
 // WorkerStatsConfig controls polling of Cloudflare Worker analytics.
@@ -285,6 +292,19 @@ verify_key = true
 [cloudflare]
 account_id = ""
 worker_name = "z-api-proxy"
+
+# If your api_token (secrets.toml) has a Client IP Address Filtering
+# restriction and your external IP changes periodically (e.g. dynamic
+# residential IP), set this to true to have Z-API Proxy keep the
+# token's allowed IP in sync automatically (polled every few minutes).
+# Requires the token to already have "User API Tokens: Edit"
+# permission on itself. NOTE: if the token's IP restriction has
+# already drifted to exclude this machine's current IP before you
+# enable this, the token is locked out of the API entirely (including
+# the self-update call) — you must first fix the restriction manually
+# in the Cloudflare dashboard to include the current IP, after which
+# this feature keeps it in sync going forward.
+auto_update_client_ip = false
 
 # Model name mappings.
 # Cursor sends "from", proxy rewrites to "to" before forwarding upstream.
